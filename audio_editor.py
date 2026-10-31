@@ -1,0 +1,1109 @@
+# -*- coding: utf-8 -*-
+"""PySide6 기반 간단 오디오 편집기 (멀티트랙 파형).
+
+Audacity처럼 반주/보컬 파형을 위아래로 분리해 보여주며,
+구간 자르기, 잡음 제거, 믹싱을 처리합니다.
+"""
+import os
+import tempfile
+import numpy as np
+import soundfile as sf
+
+from PySide6 import QtCore
+from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
+    QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox,
+)
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+
+import pyqtgraph as pg
+
+# pyqtgraph 우클릭 메뉴(영어)를 한국어로 표시하기 위한 번역 사전
+_PG_TRANSLATIONS = {
+    "ViewBox options": "보기 옵션",
+    "View All": "전체 보기",
+    "axis": "축",
+    "Mouse Mode": "마우스 모드",
+    "3 button": "3버튼 (이동)",
+    "1 button": "1버튼 (확대/축소)",
+    "Link Axis:": "축 연결:",
+    "Auto": "자동",
+    "Manual": "수동",
+    "Invert Axis": "축 뒤집기",
+    "Mouse Enabled": "마우스 조작 사용",
+    "Visible Data Only": "보이는 데이터만",
+    "Auto Pan Only": "자동 이동만",
+    "%": "%",
+    "0": "0",
+}
+
+_PG_HTML_TRANSLATIONS = {
+    "Links this axis with another view. When linked, both views will display the same data range.":
+        "이 축을 다른 보기와 연결합니다. 연결되면 두 보기가 같은 데이터 범위를 표시합니다.",
+    "Percent of data to be visible when auto-scaling. It may be useful to decrease this value for data with spiky noise.":
+        "자동 크기 조정 시 보일 데이터의 비율입니다. 뾰족한 잡음이 있는 데이터에서는 이 값을 줄이면 좋습니다.",
+    "Automatically resize this axis whenever the displayed data is changed.":
+        "표시되는 데이터가 바뀔 때마다 이 축의 크기를 자동으로 조정합니다.",
+    "Set the range for this axis manually. This disables automatic scaling. ":
+        "이 축의 범위를 수동으로 설정합니다. 자동 크기 조정이 비활성화됩니다.",
+    "Minimum value to display for this axis.":
+        "이 축에 표시할 최소값입니다.",
+    "Maximum value to display for this axis.":
+        "이 축에 표시할 최대값입니다.",
+    "Inverts the display of this axis. (+y points downward instead of upward)":
+        "이 축의 표시를 뒤집습니다. (+y가 위가 아닌 아래를 가리킵니다)",
+    "Enables mouse interaction (panning, scaling) for this axis.":
+        "이 축에서 마우스 조작(이동, 확대/축소)을 사용합니다.",
+    "When checked, the axis will only auto-scale to data that is visible along the orthogonal axis.":
+        "체크하면 직교 축을 따라 보이는 데이터에 대해서만 자동 크기 조정합니다.",
+    "When checked, the axis will automatically pan to center on the current data, but the scale along this axis will not change.":
+        "체크하면 현재 데이터를 중심으로 자동 이동하지만, 이 축의 배율은 바뀌지 않습니다.",
+}
+
+
+def _pg_translate(context, text, disambiguation=None, n=-1):
+    # HTML 포함 문자열은 태그를 보존한 채 안쪽 문장만 번역한다.
+    base = text
+    if base in _PG_TRANSLATIONS:
+        return _PG_TRANSLATIONS[base]
+    for eng, kor in _PG_HTML_TRANSLATIONS.items():
+        if eng in base:
+            base = base.replace(eng, kor)
+            if base != text:
+                return base
+    return _orig_pg_translate(context, text, disambiguation, n)
+
+
+# 원본 translate 보관
+try:
+    import pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu as _vbm
+    _orig_pg_translate = _vbm.translate
+    _vbm.translate = _pg_translate
+except Exception:
+    _orig_pg_translate = QtCore.QCoreApplication.translate
+
+# axisCtrl 템플릿은 QtCore.QCoreApplication.translate를 직접 호출하므로 클래스 메서드를 감싼다.
+try:
+    _orig_qt_translate = QtCore.QCoreApplication.translate
+    QtCore.QCoreApplication.translate = staticmethod(_pg_translate)
+except Exception:
+    pass
+
+
+def _to_mono(data):
+    if data is None:
+        return None
+    if np.ndim(data) == 1:
+        return data
+    return data.mean(axis=1)
+
+
+def _resample(data, sr_src, sr_dst):
+    if data is None or sr_src == sr_dst:
+        return data
+    from scipy import signal
+    if np.ndim(data) == 1:
+        return signal.resample_poly(data, sr_dst, sr_src).astype(np.float32)
+    out = np.zeros((int(round(data.shape[0] * sr_dst / sr_src)), data.shape[1]), dtype=np.float32)
+    for c in range(data.shape[1]):
+        out[:, c] = signal.resample_poly(data[:, c], sr_dst, sr_src)
+    return out
+
+
+class _NoiseWorker(QThread):
+    finished = Signal(object, object, str)
+
+    def __init__(self, data, sr, noise_clip=None, stationary=False):
+        super().__init__()
+        self.data = data
+        self.sr = sr
+        self.noise_clip = noise_clip
+        self.stationary = stationary
+
+    def run(self):
+        try:
+            import noisereduce as nr
+            # noisereduce는 1차원(모노) 데이터에서 가장 안정적으로 작동한다.
+            y = _to_mono(self.data).astype(np.float32)
+            if self.noise_clip is not None:
+                noise = _to_mono(self.noise_clip).astype(np.float32)
+                reduced = nr.reduce_noise(y=y, sr=self.sr, y_noise=noise)
+            else:
+                reduced = nr.reduce_noise(y=y, sr=self.sr, stationary=self.stationary)
+            self.finished.emit(reduced, self.sr, "잡음 제거 완료")
+        except Exception as e:
+            self.finished.emit(None, None, self._korean_error(str(e)))
+
+    @staticmethod
+    def _korean_error(msg: str) -> str:
+        """noisereduce 영어 오류를 한국어로 쉽게 바꾼다."""
+        if "Unable to allocate" in msg:
+            return "잡음 제거 실패: 오디오 데이터가 너무 커서 메모리가 부족합니다.\n더 짧은 오디오 파일을 사용해 주세요."
+        if "noverlap must be less than nperseg" in msg:
+            return "잡음 제거 실패: 시스템 라이브러리 버전 문제로 작동하지 않습니다.\n'잡음 구간으로 제거' 버튼을 사용해 보세요."
+        return f"잡음 제거 실패: {msg}"
+
+
+class _SelectablePlot(pg.PlotWidget):
+    """마우스 드래그로 구간을 선택할 수 있는 파형 플롯."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dialog = None
+
+    def mousePressEvent(self, ev):
+        super().mousePressEvent(ev)
+        if self.dialog is not None and ev.button() == Qt.LeftButton:
+            x = self._x_from_event(ev)
+            if x is not None:
+                self.dialog._on_mouse_pressed_x(x, self)
+
+    def mouseMoveEvent(self, ev):
+        super().mouseMoveEvent(ev)
+        if self.dialog is not None:
+            x = self._x_from_event(ev)
+            if x is not None:
+                self.dialog._on_mouse_moved_x(x)
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        if self.dialog is not None and ev.button() == Qt.LeftButton:
+            self.dialog._on_mouse_released_x()
+
+    def keyPressEvent(self, ev):
+        if self.dialog is not None:
+            if ev.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                self.dialog.delete_selection_silence()
+                ev.accept()
+                return
+            if ev.matches(QKeySequence.StandardKey.Undo):
+                self.dialog.undo()
+                ev.accept()
+                return
+        super().keyPressEvent(ev)
+
+    def _x_from_event(self, ev):
+        try:
+            scene_pos = self.mapToScene(ev.pos())
+            return float(self.getViewBox().mapSceneToView(scene_pos).x())
+        except Exception:
+            return None
+
+
+class AudioEditorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("오디오 편집기 (멀티트랙)")
+        self.resize(1000, 720)
+
+        # 트랙 데이터
+        self.track1 = None   # 반주
+        self.sr1 = None
+        self.path1 = None
+        self.track2 = None   # 보컬
+        self.sr2 = None
+        self.path2 = None
+        self.result = None   # 믹싱 결과
+        self.result_sr = None
+        self._curves = {}    # 플롯별 파형 커브 (clear() 대신 이것만 제거)
+
+        self.history = []    # (which, data, sr)
+        self._player = None
+        self._audio_out = None
+        self._temp_play = None
+        self._worker = None
+        self._syncing_region = False
+        self._play_total_sec = 0.0
+        self._pending_seek_ms = None
+        # 선택 영역을 트랙별로 관리한다.
+        self._edit_track = 1      # 편집 대상 트랙 (1/2)
+        self._play_track = 1      # 재생 시작점을 가져올 트랙 (1/2/3)
+        self._sel_track = 1       # 현재 드래그 중인 트랙
+
+        self._build_ui()
+
+    # ---------- UI ----------
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(6)
+
+        # 상단 툴바
+        toolbar = QHBoxLayout()
+        btn_open1 = QPushButton("반주 열기")
+        btn_open1.clicked.connect(lambda: self.open_track(1))
+        toolbar.addWidget(btn_open1)
+        btn_open2 = QPushButton("보컬 열기")
+        btn_open2.clicked.connect(lambda: self.open_track(2))
+        toolbar.addWidget(btn_open2)
+        toolbar.addSpacing(12)
+        btn_play = QPushButton("▶ 재생")
+        btn_play.clicked.connect(lambda: self.play_current())
+        toolbar.addWidget(btn_play)
+        btn_stop = QPushButton("■ 정지")
+        btn_stop.clicked.connect(self.stop_playback)
+        toolbar.addWidget(btn_stop)
+        toolbar.addSpacing(12)
+        self.time_label = QLabel("0.00 / 0.00")
+        self.time_label.setStyleSheet("font-weight:700; font-size:14px;")
+        toolbar.addWidget(self.time_label)
+        toolbar.addStretch(1)
+        self.status = QLabel("")
+        toolbar.addWidget(self.status)
+        layout.addLayout(toolbar)
+
+        # 재생 슬라이더
+        play_row = QHBoxLayout()
+        self.play_slider = QSlider(Qt.Horizontal)
+        self.play_slider.setRange(0, 1000)
+        self.play_slider.setValue(0)
+        self.play_slider.sliderMoved.connect(self._on_slider_moved)
+        play_row.addWidget(self.play_slider, 1)
+        layout.addLayout(play_row)
+
+        # 파형 + 트랙 헤더 그리드
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+        grid.setColumnStretch(1, 1)
+
+        self.plot1 = _SelectablePlot()
+        self.plot2 = _SelectablePlot()
+        self.plot3 = _SelectablePlot()
+        for p in (self.plot1, self.plot2, self.plot3):
+            p.dialog = self
+        self.plot2.setXLink(self.plot1)
+        self.plot3.setXLink(self.plot1)
+
+        self._setup_plot(self.plot1, "#99f6e4", "#0f172a")
+        self._setup_plot(self.plot2, "#bfdbfe", "#0f172a")
+        self._setup_plot(self.plot3, "#ddd6fe", "#0f172a")
+
+        self.header1, self.vol1, self.mute1, self.solo1, self.info1 = self._make_track_header(
+            "반주 (Track 1)", "#99f6e4", "#0f766e")
+        self.header2, self.vol2, self.mute2, self.solo2, self.info2 = self._make_track_header(
+            "보컬 (Track 2)", "#bfdbfe", "#1d4ed8")
+        self.header3, self.vol3, self.mute3, self.solo3, self.info3 = self._make_track_header(
+            "믹싱 미리보기", "#ddd6fe", "#6d28d9")
+        self.vol3.setEnabled(False)
+        self.mute3.setEnabled(False)
+        self.solo3.setEnabled(False)
+        self.label1 = self.info1
+        self.label2 = self.info2
+
+        # 볼륨/M/S 변경 시 재생 중이면 현재 위치에서 다시 믹싱해 반영
+        self._mix_timer = QTimer(self)
+        self._mix_timer.setSingleShot(True)
+        self._mix_timer.setInterval(250)
+        self._mix_timer.timeout.connect(self._apply_live_mix)
+        for w in (self.vol1, self.vol2):
+            w.valueChanged.connect(lambda _: self._mix_timer.start())
+        for w in (self.mute1, self.mute2, self.solo1, self.solo2):
+            w.toggled.connect(lambda _: self._mix_timer.start())
+
+        grid.addWidget(self.header1, 0, 0)
+        grid.addWidget(self.plot1, 0, 1)
+        grid.addWidget(self.header2, 1, 0)
+        grid.addWidget(self.plot2, 1, 1)
+        grid.addWidget(self.header3, 2, 0)
+        grid.addWidget(self.plot3, 2, 1)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+        grid.setRowStretch(2, 0)
+        self._grid = grid
+        layout.addLayout(grid, 1)
+        self.plot3.setVisible(False)
+        self.header3.setVisible(False)
+
+        # 선택 구간 (region)
+        self.region1 = pg.LinearRegionItem([0, 1], brush=(59, 130, 246, 70), pen=pg.mkPen("#1d4ed8", width=1))
+        self.region2 = pg.LinearRegionItem([0, 1], brush=(59, 130, 246, 70), pen=pg.mkPen("#1d4ed8", width=1))
+        self.region3 = pg.LinearRegionItem([0, 1], brush=(59, 130, 246, 70), pen=pg.mkPen("#1d4ed8", width=1))
+        self.plot1.addItem(self.region1)
+        self.plot2.addItem(self.region2)
+        self.plot3.addItem(self.region3)
+
+        # 클릭 지점 세로선 (핀포인트 커서)
+        self.cursor1 = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#dc2626", width=2, style=Qt.DashLine),
+                                       markers=[("^", 0, 10)])
+        self.cursor2 = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#dc2626", width=2, style=Qt.DashLine),
+                                       markers=[("^", 0, 10)])
+        self.cursor3 = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#dc2626", width=2, style=Qt.DashLine),
+                                       markers=[("^", 0, 10)])
+        self.plot1.addItem(self.cursor1)
+        self.plot2.addItem(self.cursor2)
+        self.plot3.addItem(self.cursor3)
+
+        # 재생 위치 세로선 (플레이헤드)
+        self.playhead1 = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#fbbf24", width=2),
+                                         markers=[("^", 0, 12)])
+        self.playhead2 = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#fbbf24", width=2),
+                                         markers=[("^", 0, 12)])
+        self.playhead3 = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#fbbf24", width=2),
+                                         markers=[("^", 0, 12)])
+        self.plot1.addItem(self.playhead1)
+        self.plot2.addItem(self.playhead2)
+        self.plot3.addItem(self.playhead3)
+
+        # 파형 위에 항상 보이도록 그리기 순서를 올린다.
+        for reg in (self.region1, self.region2, self.region3):
+            reg.setZValue(5)
+            reg.setMovable(False)  # 선택은 마우스 드래그 핸들러가 직접 처리
+        for cur in (self.cursor1, self.cursor2, self.cursor3):
+            cur.setZValue(20)
+        for ph in (self.playhead1, self.playhead2, self.playhead3):
+            ph.setZValue(30)
+
+        self.region1.sigRegionChanged.connect(lambda: self._on_region_changed(self.region1))
+        self.region2.sigRegionChanged.connect(lambda: self._on_region_changed(self.region2))
+        self.region3.sigRegionChanged.connect(lambda: self._on_region_changed(self.region3))
+
+        # 편집 대상 선택
+        target_row = QHBoxLayout()
+        target_row.addWidget(QLabel("편집 대상 트랙:"))
+        self.combo_target = QComboBox()
+        self.combo_target.addItems(["반주 (1번)", "보컬 (2번)"])
+        self.combo_target.currentIndexChanged.connect(self._on_target_changed)
+        target_row.addWidget(self.combo_target)
+        self.chk_link_selection = QCheckBox("두 트랙 함께 선택")
+        self.chk_link_selection.setToolTip(
+            "체크하면 한 트랙을 드래그할 때 반주와 보컬이 같은 구간으로 선택됩니다.")
+        self.chk_link_selection.toggled.connect(self._on_link_toggled)
+        target_row.addWidget(self.chk_link_selection)
+        target_row.addStretch(1)
+        layout.addLayout(target_row)
+
+        # 트리밍
+        trim_frame = QFrame()
+        trim_frame.setFrameShape(QFrame.StyledPanel)
+        trim_layout = QHBoxLayout(trim_frame)
+        trim_layout.addWidget(QLabel("선택 구간:"))
+        self.lbl_selection = QLabel("드래그로 선택하세요")
+        self.lbl_selection.setStyleSheet("color: #1d4ed8; font-weight: bold;")
+        trim_layout.addWidget(self.lbl_selection)
+        trim_layout.addStretch(1)
+        btn_keep = QPushButton("선택 구간만 남기기")
+        btn_keep.clicked.connect(self.trim_keep)
+        trim_layout.addWidget(btn_keep)
+        btn_del = QPushButton("선택 구간 음소거 (Del)")
+        btn_del.clicked.connect(self.delete_selection_silence)
+        trim_layout.addWidget(btn_del)
+        btn_undo = QPushButton("되돌리기 (Ctrl+Z)")
+        btn_undo.clicked.connect(self.undo)
+        trim_layout.addWidget(btn_undo)
+        layout.addWidget(trim_frame)
+
+        # 잡음 제거
+        noise_frame = QFrame()
+        noise_frame.setFrameShape(QFrame.StyledPanel)
+        noise_layout = QHBoxLayout(noise_frame)
+        noise_layout.addWidget(QLabel("잡음 구간 시작(초):"))
+        self.spin_nstart = QDoubleSpinBox()
+        self.spin_nstart.setRange(0, 1e6)
+        self.spin_nstart.setDecimals(3)
+        noise_layout.addWidget(self.spin_nstart)
+        noise_layout.addWidget(QLabel("끝(초):"))
+        self.spin_nend = QDoubleSpinBox()
+        self.spin_nend.setRange(0, 1e6)
+        self.spin_nend.setDecimals(3)
+        noise_layout.addWidget(self.spin_nend)
+        btn_noise_sel = QPushButton("잡음 구간으로 제거")
+        btn_noise_sel.clicked.connect(self.noise_reduce_selected)
+        noise_layout.addWidget(btn_noise_sel)
+        btn_noise_auto = QPushButton("자동 잡음 제거")
+        btn_noise_auto.clicked.connect(self.noise_reduce_auto)
+        noise_layout.addWidget(btn_noise_auto)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setVisible(False)
+        noise_layout.addWidget(self.progress)
+        layout.addWidget(noise_frame)
+
+        # 믹싱 / 저장
+        mix_frame = QFrame()
+        mix_frame.setFrameShape(QFrame.StyledPanel)
+        mix_layout = QHBoxLayout(mix_frame)
+        btn_mix = QPushButton("믹싱 미리보기 (1+2)")
+        btn_mix.clicked.connect(self.mix_tracks)
+        mix_layout.addWidget(btn_mix)
+        btn_save1 = QPushButton("1번 트랙 저장")
+        btn_save1.clicked.connect(lambda: self.save_track(1))
+        mix_layout.addWidget(btn_save1)
+        btn_save2 = QPushButton("2번 트랙 저장")
+        btn_save2.clicked.connect(lambda: self.save_track(2))
+        mix_layout.addWidget(btn_save2)
+        btn_save_both = QPushButton("두 트랙 따로 저장")
+        btn_save_both.clicked.connect(self.save_both_tracks)
+        mix_layout.addWidget(btn_save_both)
+        btn_save_res = QPushButton("믹스 미리보기 저장")
+        btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
+        btn_save_res.clicked.connect(self.save_result)
+        mix_layout.addWidget(btn_save_res)
+        mix_layout.addStretch(1)
+        layout.addWidget(mix_frame)
+
+        # 마우스로 파형 드래그 선택
+        self._selecting = False
+        self._sel_start = 0.0
+
+        # 키보드 단축키
+        from PySide6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.delete_selection_silence)
+        QShortcut(QKeySequence.Undo, self, activated=self.undo)
+
+    def _setup_plot(self, plot, bg, wave_pen):
+        plot.setBackground(bg)
+        plot.showGrid(x=True, y=True, alpha=0.25)
+        plot.setMinimumHeight(120)
+        # 마우스 왼쪽 드래그는 화면 이동(pan)이 아니라 구간 선택에만 쓴다.
+        plot.setMouseEnabled(x=False, y=False)
+        plot.wave_pen = wave_pen
+        plot.getAxis("left").setPen(pg.mkPen("#334155"))
+        plot.getAxis("bottom").setPen(pg.mkPen("#334155"))
+
+    def _make_track_header(self, title, bg, accent):
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background: {bg}; border: 1px solid {accent}; border-radius: 6px; }}")
+        frame.setFixedWidth(220)
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(8, 6, 8, 6)
+        v.setSpacing(4)
+        name = QLabel(title)
+        name.setStyleSheet(f"color: {accent}; font-weight: 700; border: none;")
+        v.addWidget(name)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        icon = QLabel("🔊")
+        icon.setStyleSheet("border: none;")
+        row.addWidget(icon)
+        vol = QSlider(Qt.Horizontal)
+        vol.setRange(0, 200)
+        vol.setValue(100)
+        row.addWidget(vol, 1)
+        mute = QPushButton("M")
+        mute.setCheckable(True)
+        mute.setFixedWidth(28)
+        mute.setToolTip("M: 이 트랙 음소거")
+        mute.setStyleSheet("QPushButton:checked { background: #dc2626; color: white; font-weight: 700; }")
+        solo = QPushButton("S")
+        solo.setCheckable(True)
+        solo.setFixedWidth(28)
+        solo.setToolTip("S: 이 트랙만 재생 (다른 트랙 음소거)")
+        solo.setStyleSheet("QPushButton:checked { background: #f59e0b; color: #111827; font-weight: 700; }")
+        row.addWidget(mute)
+        row.addWidget(solo)
+        v.addLayout(row)
+        info = QLabel("(없음)")
+        info.setStyleSheet("color: #334155; border: none; font-size: 11px;")
+        v.addWidget(info)
+        v.addStretch(1)
+        return frame, vol, mute, solo, info
+
+    # ---------- 내부 헬퍼 ----------
+    def _region_for_track(self, track):
+        if track == 1:
+            return self.region1
+        if track == 2:
+            return self.region2
+        return self.region3
+
+    def _sync_regions(self, src):
+        """'두 트랙 함께 선택'이 켜져 있을 때만 모든 트랙을 같게 맞춘다."""
+        if self._syncing_region:
+            return
+        self._syncing_region = True
+        r = src.getRegion()
+        for reg in (self.region1, self.region2, self.region3):
+            if reg is not src:
+                reg.setRegion(r)
+        self._syncing_region = False
+        self._region_to_spins()
+
+    def _on_region_changed(self, region):
+        if self._syncing_region:
+            return
+        if self.chk_link_selection.isChecked():
+            self._sync_regions(region)
+        elif region is self._region_for_track(self._edit_track):
+            self._region_to_spins()
+
+    def _on_target_changed(self, idx):
+        self._edit_track = 1 if idx == 0 else 2
+        self._play_track = self._edit_track
+        self._update_spin_ranges()
+        self._region_to_spins()
+
+    def _on_link_toggled(self, checked):
+        # 켜는 순간 현재 편집 트랙의 선택 구간을 두 트랙에 복사한다.
+        if checked:
+            self._sync_regions(self._region_for_track(self._edit_track))
+
+    def _region_to_spins(self):
+        r = self._region_for_track(self._edit_track).getRegion()
+        self.lbl_selection.setText(f"{r[0]:.3f} ~ {r[1]:.3f} 초")
+
+    def _current_track(self):
+        idx = self.combo_target.currentIndex()  # 0: track1, 1: track2
+        if idx == 0:
+            return 1, self.track1, self.sr1
+        return 2, self.track2, self.sr2
+
+    def _set_track(self, which, data, sr, msg=""):
+        if which == 1:
+            self.track1 = np.asarray(data) if data is not None else None
+            self.sr1 = int(sr) if sr is not None else None
+            self._plot_track(self.plot1, self.track1, self.sr1, "반주 (Track 1)")
+            if self.track1 is not None:
+                dur = len(self.track1) / self.sr1
+                self.region1.setRegion((0, min(1.0, dur)))
+        else:
+            self.track2 = np.asarray(data) if data is not None else None
+            self.sr2 = int(sr) if sr is not None else None
+            self._plot_track(self.plot2, self.track2, self.sr2, "보컬 (Track 2)")
+            if self.track2 is not None:
+                dur = len(self.track2) / self.sr2
+                self.region2.setRegion((0, min(1.0, dur)))
+        if msg:
+            self.status.setText(msg)
+        self._update_spin_ranges()
+        self.spin_nend.setValue(min(1.0, self.spin_nend.maximum()))
+        # 스핀박스 값이 실제 선택 영역과 일치하도록 맞춘다.
+        self._region_to_spins()
+
+    def _plot_track(self, plot, data, sr, title):
+        # plot.clear()를 쓰면 핀포인트/선택 영역까지 지워지므로,
+        # 이전 파형 커브만 골라서 제거한다.
+        old = self._curves.pop(plot, None)
+        if old is not None:
+            plot.removeItem(old)
+        if data is None:
+            return
+        y = _to_mono(data)
+        n = len(y)
+        if n > 200000:
+            step = n // 200000
+            y = y[::step]
+            t = np.arange(len(y)) * step / sr
+        else:
+            t = np.arange(n) / sr
+        curve = plot.plot(t, y, pen=pg.mkPen("#60a5fa", width=1))
+        self._curves[plot] = curve
+        plot.setTitle(title)
+
+    def _update_spin_ranges(self):
+        # 잡음 제거 구간 입력칸의 범위만 갱신한다.
+        t, data, sr = self._current_track()
+        if data is None:
+            return
+        dur = len(data) / sr
+        for sp in (self.spin_nstart, self.spin_nend):
+            sp.setRange(0, dur)
+
+    def _push_history(self, which, data, sr):
+        self.history.append((which, data.copy() if data is not None else None, sr))
+        if len(self.history) > 20:
+            self.history.pop(0)
+
+    # ---------- 파일 ----------
+    def open_track(self, which, path=None):
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "오디오 파일 선택", "", "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a);;All Files (*)")
+        if not path:
+            return
+        try:
+            data, sr = sf.read(path, dtype="float32", always_2d=False)
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"파일을 열 수 없습니다:\n{e}")
+            return
+        if which == 1:
+            self.path1 = path
+            self.label1.setText(f"반주(1번): {os.path.basename(path)}")
+        else:
+            self.path2 = path
+            self.label2.setText(f"보컬(2번): {os.path.basename(path)}")
+        self._set_track(which, data, sr, f"불러옴: {os.path.basename(path)}")
+
+    def save_track(self, which):
+        """1번(반주) 또는 2번(보컬) 트랙을 그대로 따로 저장한다."""
+        if which == 1:
+            data, sr, src_path, name = self.track1, self.sr1, self.path1, "반주"
+        else:
+            data, sr, src_path, name = self.track2, self.sr2, self.path2, "보컬"
+        if data is None:
+            QMessageBox.warning(self, "경고", f"{which}번 트랙({name})이 비어 있습니다.")
+            return
+        # 원본 파일명이 있으면 그것을 기준으로 기본 이름을 만든다.
+        if src_path:
+            base = os.path.splitext(os.path.basename(src_path))[0]
+            default = f"{base}_편집.wav"
+        else:
+            default = f"{name}_편집.wav"
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"{which}번 트랙({name}) 저장", default,
+            "WAV (*.wav);;FLAC (*.flac);;MP3 (*.mp3);;OGG (*.ogg)")
+        if not path:
+            return
+        try:
+            # 다른 트랙과 섞지 않고, 이 트랙의 원래 샘플레이트 그대로 저장한다.
+            sf.write(path, data, sr)
+            self.status.setText(f"{which}번 트랙({name}) 저장 완료: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"저장 실패:\n{e}")
+
+    def save_both_tracks(self):
+        """반주와 보컬을 하나로 합치지 않고 각각 별도 파일로 저장한다."""
+        if self.track1 is None or self.track2 is None:
+            QMessageBox.warning(self, "경고", "반주와 보컬을 모두 불러오세요.")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "두 트랙을 저장할 폴더 선택")
+        if not folder:
+            return
+        targets = [
+            (os.path.join(folder, "반주_편집.wav"), self.track1, self.sr1),
+            (os.path.join(folder, "보컬_편집.wav"), self.track2, self.sr2),
+        ]
+        existing = [p for p, _, _ in targets if os.path.exists(p)]
+        if existing:
+            ret = QMessageBox.question(
+                self, "덮어쓰기 확인",
+                "같은 이름의 파일이 이미 있습니다. 덮어쓸까요?\n\n" + "\n".join(existing))
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            for p, data, sr in targets:
+                # 각 트랙을 원래 샘플레이트 그대로 저장 (믹싱하지 않음)
+                sf.write(p, data, sr)
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"저장 실패:\n{e}")
+            return
+        self.status.setText(f"두 트랙을 따로 저장했습니다: {folder}")
+        QMessageBox.information(
+            self, "완료",
+            "반주와 보컬을 하나로 합치지 않고 각각 저장했습니다.\n\n"
+            + "\n".join(p for p, _, _ in targets))
+
+    def save_result(self):
+        if self.result is None:
+            QMessageBox.warning(self, "경고", "믹싱 미리보기가 없습니다. 먼저 '믹싱 미리보기 (1+2)'를 눌러주세요.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "믹스 미리보기 저장", "믹스_미리보기.wav", "WAV (*.wav);;FLAC (*.flac);;MP3 (*.mp3);;OGG (*.ogg)")
+        if not path:
+            return
+        try:
+            sf.write(path, self.result, self.result_sr)
+            self.status.setText(f"믹스 미리보기 저장 완료: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"저장 실패:\n{e}")
+
+    # ---------- 재생 ----------
+    def _align_pair(self, d1, sr1, d2, sr2):
+        """두 트랙의 샘플레이트/채널/길이를 맞춘다."""
+        d2 = _resample(d2, sr2, sr1)
+        if np.ndim(d1) != np.ndim(d2):
+            if np.ndim(d1) == 1 and np.ndim(d2) == 2:
+                d1 = np.column_stack([d1, d1])
+            elif np.ndim(d2) == 1 and np.ndim(d1) == 2:
+                d2 = np.column_stack([d2, d2])
+        n = max(d1.shape[0], d2.shape[0])
+        if d1.shape[0] < n:
+            pad = n - d1.shape[0]
+            if np.ndim(d1) == 1:
+                d1 = np.concatenate([d1, np.zeros(pad, dtype=d1.dtype)])
+            else:
+                d1 = np.concatenate([d1, np.zeros((pad, d1.shape[1]), dtype=d1.dtype)], axis=0)
+        if d2.shape[0] < n:
+            pad = n - d2.shape[0]
+            if np.ndim(d2) == 1:
+                d2 = np.concatenate([d2, np.zeros(pad, dtype=d2.dtype)])
+            else:
+                d2 = np.concatenate([d2, np.zeros((pad, d2.shape[1]), dtype=d2.dtype)], axis=0)
+        return d1, d2, sr1
+
+    def _build_playback_data(self):
+        """현재 트랙 상태(볼륨/M/S 포함)로 재생용 오디오를 만든다."""
+        if self.track1 is not None and self.track2 is not None:
+            d1, d2, sr = self._align_pair(self.track1, self.sr1, self.track2, self.sr2)
+            solo1 = self.solo1.isChecked()
+            solo2 = self.solo2.isChecked()
+            v1 = 0.0 if (self.mute1.isChecked() or (solo2 and not solo1)) else self.vol1.value() / 100.0
+            v2 = 0.0 if (self.mute2.isChecked() or (solo1 and not solo2)) else self.vol2.value() / 100.0
+            mixed = d1 * v1 + d2 * v2
+            peak = np.max(np.abs(mixed)) if mixed.size else 1.0
+            if peak > 0.99:
+                mixed = mixed * (0.99 / peak)
+            return mixed.astype(np.float32), sr
+        if self.track1 is not None:
+            v = 0.0 if self.mute1.isChecked() else self.vol1.value() / 100.0
+            return (self.track1 * v).astype(np.float32), self.sr1
+        if self.track2 is not None:
+            v = 0.0 if self.mute2.isChecked() else self.vol2.value() / 100.0
+            return (self.track2 * v).astype(np.float32), self.sr2
+        if self.result is not None:
+            return self.result, self.result_sr
+        return None, None
+
+    def play_current(self, start_sec=None):
+        data, sr = self._build_playback_data()
+        if data is None:
+            QMessageBox.information(self, "정보", "재생할 트랙이 없습니다.")
+            return
+        # 기존 재생 정지
+        if self._player is not None:
+            self._player.stop()
+        # 이전 임시 파일 정리
+        if self._temp_play and os.path.exists(self._temp_play):
+            try:
+                os.remove(self._temp_play)
+            except Exception:
+                pass
+        try:
+            fd, tmp = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+            sf.write(tmp, data, sr)
+            self._temp_play = tmp
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"재생 준비 실패:\n{e}")
+            return
+        if self._player is None:
+            self._player = QMediaPlayer()
+            self._audio_out = QAudioOutput()
+            self._player.setAudioOutput(self._audio_out)
+            self._player.positionChanged.connect(self._on_position_changed)
+            self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._play_total_sec = len(data) / sr
+        # 선택 구간이 있으면 그 시작점에서, 없으면 핀포인트 위치에서 재생 시작
+        r = self._region_for_track(self._play_track).getRegion()
+        if start_sec is not None:
+            start = float(start_sec)
+        elif r[1] - r[0] > 0.05:
+            start = float(r[0])
+        else:
+            start = float(self.cursor1.pos().x())
+        start = max(0.0, min(start, max(0.0, self._play_total_sec - 0.01)))
+        self._pending_seek_ms = int(start * 1000)
+        self._player.setSource(QUrl.fromLocalFile(tmp))
+        self._player.play()
+        self.status.setText(f"재생 중... ({start:.2f}초부터)")
+
+    def _apply_live_mix(self):
+        """재생 중 볼륨/M/S가 바뀌면 현재 위치에서 다시 재생한다."""
+        if self._player is None:
+            return
+        from PySide6.QtMultimedia import QMediaPlayer
+        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            pos = self._player.position() / 1000.0
+            self.play_current(start_sec=pos)
+
+    def _on_position_changed(self, pos_ms):
+        if self._play_total_sec <= 0:
+            return
+        dur_ms = self._play_total_sec * 1000.0
+        # 슬라이더 갱신 (사용자가 드래그 중이 아닐 때)
+        if not self.play_slider.isSliderDown():
+            self.play_slider.blockSignals(True)
+            self.play_slider.setValue(int(pos_ms / dur_ms * 1000))
+            self.play_slider.blockSignals(False)
+        # 플레이헤드 갱신
+        t = pos_ms / 1000.0
+        for ph in (self.playhead1, self.playhead2, self.playhead3):
+            ph.setPos(t)
+        # 시간 라벨
+        self.time_label.setText(f"{t:.2f} / {self._play_total_sec:.2f}")
+
+    def _on_media_status(self, status):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
+            seek = getattr(self, "_pending_seek_ms", None)
+            if seek is not None:
+                self._player.setPosition(seek)
+                self._pending_seek_ms = None
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.stop_playback()
+            self.status.setText("재생 완료")
+
+    def _on_slider_moved(self, value):
+        if self._player is None or self._play_total_sec <= 0:
+            return
+        pos_ms = int(value / 1000.0 * self._play_total_sec * 1000.0)
+        self._player.setPosition(pos_ms)
+
+    def stop_playback(self):
+        if self._player is not None:
+            self._player.stop()
+        self.play_slider.setValue(0)
+        for ph in (self.playhead1, self.playhead2, self.playhead3):
+            ph.setPos(0)
+        self.time_label.setText(f"0.00 / {self._play_total_sec:.2f}" if self._play_total_sec else "0.00 / 0.00")
+        self.status.setText("정지")
+
+    # ---------- 마우스 선택 ----------
+    def _track_for_plot(self, plot):
+        if plot is self.plot1:
+            return 1
+        if plot is self.plot2:
+            return 2
+        return 3
+
+    def _view_x_from_event(self, event):
+        try:
+            pos = event.pos() if hasattr(event, "pos") else None
+            if pos is None:
+                return None
+            vb = self.plot1.getViewBox()
+            pt = vb.mapSceneToView(pos)
+            return float(pt.x())
+        except Exception:
+            return None
+
+    def _on_mouse_pressed_x(self, x, plot=None):
+        track = self._track_for_plot(plot) if plot is not None else self._edit_track
+        self._sel_track = track
+        self._selecting = True
+        self._sel_start = x
+        # 핀포인트(재생 시작 위치)는 모든 트랙에 표시한다.
+        for c in (self.cursor1, self.cursor2, self.cursor3):
+            c.setPos(x)
+
+        if track in (1, 2):
+            # 드래그한 트랙을 편집 대상으로 맞춘다.
+            self._edit_track = track
+            self._play_track = track
+            idx = 0 if track == 1 else 1
+            if self.combo_target.currentIndex() != idx:
+                self.combo_target.blockSignals(True)
+                self.combo_target.setCurrentIndex(idx)
+                self.combo_target.blockSignals(False)
+                self._update_spin_ranges()
+        else:
+            self._play_track = 3
+
+        # 선택 영역은 드래그한 트랙에만 만든다.
+        region = self._region_for_track(track)
+        region.setRegion((x, x))
+        if self.chk_link_selection.isChecked():
+            self._sync_regions(region)
+        if track in (1, 2):
+            self._region_to_spins()
+
+    def _on_mouse_moved_x(self, x):
+        if not self._selecting:
+            return
+        # 드래그 중에도 커서가 마우스를 따라간다.
+        for c in (self.cursor1, self.cursor2, self.cursor3):
+            c.setPos(x)
+        lo = min(self._sel_start, x)
+        hi = max(self._sel_start, x)
+        # 드래그를 시작한 트랙의 선택 영역만 갱신한다.
+        self._region_for_track(self._sel_track).setRegion((lo, hi))
+
+    def _on_mouse_released_x(self):
+        if not self._selecting:
+            return
+        self._selecting = False
+        if self._sel_track in (1, 2):
+            self._region_to_spins()
+
+    # ---------- 편집 ----------
+    def delete_selection_silence(self):
+        """선택 구간을 음소거(0)로 바꾼다. 트랙 전체 길이는 그대로 유지한다."""
+        # "두 트랙 함께 선택"이 켜져 있으면 반주/보컬 모두 음소거한다.
+        targets = [1, 2] if self.chk_link_selection.isChecked() else [self.combo_target.currentIndex() + 1]
+        r = self._region_for_track(targets[0]).getRegion()
+        s, e = float(r[0]), float(r[1])
+        if e <= s:
+            QMessageBox.warning(self, "경고", "끝 시간이 시작 시간보다 커야 합니다.")
+            return
+        for which in targets:
+            data = self.track1 if which == 1 else self.track2
+            sr = self.sr1 if which == 1 else self.sr2
+            if data is None:
+                continue
+            self._push_history(which, data, sr)
+            i0 = int(round(s * sr))
+            i1 = int(round(e * sr))
+            i0 = max(0, min(i0, len(data)))
+            i1 = max(0, min(i1, len(data)))
+            if i1 <= i0:
+                continue
+            new_data = data.copy()
+            if np.ndim(data) == 1:
+                new_data[i0:i1] = 0
+            else:
+                new_data[i0:i1, :] = 0
+            name = "반주" if which == 1 else "보컬"
+            self._set_track(which, new_data, sr, f"{name} 구간 {s:.3f}~{e:.3f}초 음소거 (길이 {len(data)/sr:.2f}초 유지)")
+        for which in targets:
+            self._region_for_track(which).setRegion((s, e))
+        self._region_to_spins()
+
+    def trim_keep(self):
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        if e <= s:
+            QMessageBox.warning(self, "경고", "끝 시간이 시작 시간보다 커야 합니다.")
+            return
+        self._push_history(which, data, sr)
+        i0 = int(round(s * sr))
+        i1 = int(round(e * sr))
+        i0 = max(0, min(i0, len(data)))
+        i1 = max(0, min(i1, len(data)))
+        new_data = data[i0:i1]
+        self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초만 남김")
+
+    def trim_delete(self):
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        if e <= s:
+            QMessageBox.warning(self, "경고", "끝 시간이 시작 시간보다 커야 합니다.")
+            return
+        self._push_history(which, data, sr)
+        i0 = int(round(s * sr))
+        i1 = int(round(e * sr))
+        i0 = max(0, min(i0, len(data)))
+        i1 = max(0, min(i1, len(data)))
+        if np.ndim(data) == 1:
+            new_data = np.concatenate([data[:i0], data[i1:]])
+        else:
+            new_data = np.concatenate([data[:i0], data[i1:]], axis=0)
+        self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초 삭제")
+
+    def undo(self):
+        if not self.history:
+            self.status.setText("되돌릴 작업이 없습니다.")
+            return
+        which, data, sr = self.history.pop()
+        self._set_track(which, data, sr, "되돌리기 완료")
+
+    def noise_reduce_selected(self):
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        s = self.spin_nstart.value()
+        e = self.spin_nend.value()
+        if e <= s:
+            QMessageBox.warning(self, "경고", "잡음 구간 끝이 시작보다 커야 합니다.")
+            return
+        i0 = int(round(s * sr))
+        i1 = int(round(e * sr))
+        i0 = max(0, min(i0, len(data)))
+        i1 = max(0, min(i1, len(data)))
+        noise_clip = data[i0:i1]
+        self._run_noise(which, data, sr, noise_clip, False)
+
+    def noise_reduce_auto(self):
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        self._run_noise(which, data, sr, None, True)
+
+    def _run_noise(self, which, data, sr, noise_clip, stationary):
+        # 데이터가 너무 길면 잡음 제거가 메모리 부족으로 실패할 수 있다.
+        dur = len(data) / sr
+        if dur > 60:
+            reply = QMessageBox.question(
+                self, "확인",
+                f"오디오 길이가 {dur:.1f}초로 깁니다.\n"
+                f"잡음 제거는 메모리를 많이 사용해 실패할 수 있습니다.\n"
+                f"계속하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+        self._push_history(which, data, sr)
+        self.progress.setVisible(True)
+        self._worker = _NoiseWorker(data, sr, noise_clip, stationary)
+        self._worker.finished.connect(lambda d, s, m, w=which: self._on_noise_done(w, d, s, m))
+        self._worker.start()
+
+    def _on_noise_done(self, which, data, sr, msg):
+        self.progress.setVisible(False)
+        if data is None:
+            QMessageBox.critical(self, "오류", msg)
+            if self.history:
+                self.history.pop()
+            return
+        self._set_track(which, data, sr, msg)
+
+    # ---------- 믹싱 ----------
+    def mix_tracks(self):
+        if self.track1 is None or self.track2 is None:
+            QMessageBox.warning(self, "경고", "반주와 보컬을 모두 불러오세요.")
+            return
+        d1 = self.track1.copy()
+        d2 = _resample(self.track2, self.sr2, self.sr1)
+        # 채널 수 맞추기
+        if np.ndim(d1) != np.ndim(d2):
+            if np.ndim(d1) == 1 and np.ndim(d2) == 2:
+                d1 = np.column_stack([d1, d1])
+            elif np.ndim(d2) == 1 and np.ndim(d1) == 2:
+                d2 = np.column_stack([d2, d2])
+        # 길이 맞추기 (긴 쪽에 패딩)
+        n = max(d1.shape[0], d2.shape[0])
+        if d1.shape[0] < n:
+            pad = n - d1.shape[0]
+            if np.ndim(d1) == 1:
+                d1 = np.concatenate([d1, np.zeros(pad, dtype=d1.dtype)])
+            else:
+                d1 = np.concatenate([d1, np.zeros((pad, d1.shape[1]), dtype=d1.dtype)], axis=0)
+        if d2.shape[0] < n:
+            pad = n - d2.shape[0]
+            if np.ndim(d2) == 1:
+                d2 = np.concatenate([d2, np.zeros(pad, dtype=d2.dtype)])
+            else:
+                d2 = np.concatenate([d2, np.zeros((pad, d2.shape[1]), dtype=d2.dtype)], axis=0)
+        # 볼륨/M/S 반영 (솔로가 켜져 있으면 반대 트랙은 묵음)
+        solo1 = self.solo1.isChecked()
+        solo2 = self.solo2.isChecked()
+        v1 = 0.0 if (self.mute1.isChecked() or (solo2 and not solo1)) else self.vol1.value() / 100.0
+        v2 = 0.0 if (self.mute2.isChecked() or (solo1 and not solo2)) else self.vol2.value() / 100.0
+        mixed = d1 * v1 + d2 * v2
+        peak = np.max(np.abs(mixed)) if mixed.size else 1.0
+        if peak > 0.99:
+            mixed = mixed * (0.99 / peak)
+        mixed = mixed.astype(np.float32)
+        self.result = mixed
+        self.result_sr = self.sr1
+        # 결과 플롯 표시 (미리보기 전용: 원본 track1/track2는 변경하지 않는다)
+        self._plot_track(self.plot3, mixed, self.result_sr, "믹싱 미리보기 (저장용 아님)")
+        self.plot3.setVisible(True)
+        self.header3.setVisible(True)
+        self._grid.setRowStretch(2, 1)
+        self.info3.setText(f"길이 {len(mixed)/self.result_sr:.2f}초")
+        self.status.setText("믹싱 완료 — 미리보기일 뿐, 원본 트랙은 그대로 유지됩니다")
+
+    def keyPressEvent(self, ev):
+        """다이얼로그에 포커스가 있을 때도 Del/Ctrl+Z가 동작하도록 한다."""
+        if ev.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self.delete_selection_silence()
+            ev.accept()
+            return
+        if ev.matches(QKeySequence.StandardKey.Undo):
+            self.undo()
+            ev.accept()
+            return
+        super().keyPressEvent(ev)
+
+    def closeEvent(self, event):
+        # 창을 닫을 때 재생 중이면 정지
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+        if self._temp_play and os.path.exists(self._temp_play):
+            try:
+                os.remove(self._temp_play)
+            except Exception:
+                pass
+        super().closeEvent(event)
+        event.accept()

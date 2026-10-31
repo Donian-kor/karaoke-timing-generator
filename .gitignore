@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environment
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local settings (user-specific)
+settings.json
