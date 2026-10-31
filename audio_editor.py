@@ -112,6 +112,25 @@ def _resample(data, sr_src, sr_dst):
     return out
 
 
+class _LoadTrackWorker(QThread):
+    """오디오 파일을 백그라운드에서 읽어 UI 멈춤을 방지한다."""
+    finished = Signal(object, object, str, int)  # data, sr, path, which
+    failed = Signal(str)
+
+    def __init__(self, path, which):
+        super().__init__()
+        self.path = path
+        self.which = which
+
+    def run(self):
+        try:
+            import soundfile as sf
+            data, sr = sf.read(self.path, dtype="float32", always_2d=False)
+            self.finished.emit(data, sr, self.path, self.which)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class _NoiseWorker(QThread):
     finished = Signal(object, object, str)
 
@@ -125,10 +144,12 @@ class _NoiseWorker(QThread):
     def run(self):
         try:
             import noisereduce as nr
-            # noisereduce는 1차원(모노) 데이터에서 가장 안정적으로 작동한다.
-            y = _to_mono(self.data).astype(np.float32)
+            # 스테레오(2채널) 상태를 그대로 유지한다.
+            # noisereduce는 2차원 배열(샘플, 채널)을 지원하며,
+            # 좌우 채널을 각각 독립적으로 잡음 제거한다.
+            y = self.data.astype(np.float32)
             if self.noise_clip is not None:
-                noise = _to_mono(self.noise_clip).astype(np.float32)
+                noise = self.noise_clip.astype(np.float32)
                 reduced = nr.reduce_noise(y=y, sr=self.sr, y_noise=noise)
             else:
                 reduced = nr.reduce_noise(y=y, sr=self.sr, stationary=self.stationary)
@@ -388,6 +409,9 @@ class AudioEditorDialog(QDialog):
         btn_del = QPushButton("선택 구간 음소거 (Del)")
         btn_del.clicked.connect(self.delete_selection_silence)
         trim_layout.addWidget(btn_del)
+        btn_cut = QPushButton("선택 구간 잘라내기")
+        btn_cut.clicked.connect(self.trim_delete)
+        trim_layout.addWidget(btn_cut)
         btn_undo = QPushButton("되돌리기 (Ctrl+Z)")
         btn_undo.clicked.connect(self.undo)
         trim_layout.addWidget(btn_undo)
@@ -450,6 +474,9 @@ class AudioEditorDialog(QDialog):
         from PySide6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.delete_selection_silence)
         QShortcut(QKeySequence.Undo, self, activated=self.undo)
+
+        # 초기 편집 대상 트랙 강조
+        self._update_target_highlight()
 
     def _setup_plot(self, plot, bg, wave_pen):
         plot.setBackground(bg)
@@ -533,6 +560,18 @@ class AudioEditorDialog(QDialog):
         self._play_track = self._edit_track
         self._update_spin_ranges()
         self._region_to_spins()
+        self._update_target_highlight()
+
+    def _update_target_highlight(self):
+        """현재 편집 대상 트랙의 파형에 강조 테두리를 입힌다."""
+        selected_style = "border: 3px solid #dc2626; border-radius: 4px;"
+        normal_style = "border: 1px solid #334155; border-radius: 4px;"
+        if self._edit_track == 1:
+            self.plot1.setStyleSheet(selected_style)
+            self.plot2.setStyleSheet(normal_style)
+        else:
+            self.plot1.setStyleSheet(normal_style)
+            self.plot2.setStyleSheet(selected_style)
 
     def _on_link_toggled(self, checked):
         # 켜는 순간 현재 편집 트랙의 선택 구간을 두 트랙에 복사한다.
@@ -612,11 +651,14 @@ class AudioEditorDialog(QDialog):
                 self, "오디오 파일 선택", "", "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a);;All Files (*)")
         if not path:
             return
-        try:
-            data, sr = sf.read(path, dtype="float32", always_2d=False)
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"파일을 열 수 없습니다:\n{e}")
-            return
+        self.progress.setVisible(True)
+        self._load_worker = _LoadTrackWorker(path, which)
+        self._load_worker.finished.connect(lambda data, sr, p, w=which: self._on_track_loaded(w, data, sr, p))
+        self._load_worker.failed.connect(lambda msg: self._on_track_load_failed(msg))
+        self._load_worker.start()
+
+    def _on_track_loaded(self, which, data, sr, path):
+        self.progress.setVisible(False)
         if which == 1:
             self.path1 = path
             self.label1.setText(f"반주(1번): {os.path.basename(path)}")
@@ -624,6 +666,10 @@ class AudioEditorDialog(QDialog):
             self.path2 = path
             self.label2.setText(f"보컬(2번): {os.path.basename(path)}")
         self._set_track(which, data, sr, f"불러옴: {os.path.basename(path)}")
+
+    def _on_track_load_failed(self, msg):
+        self.progress.setVisible(False)
+        QMessageBox.critical(self, "오류", f"파일을 열 수 없습니다:\n{msg}")
 
     def save_track(self, which):
         """1번(반주) 또는 2번(보컬) 트랙을 그대로 따로 저장한다."""
@@ -860,6 +906,13 @@ class AudioEditorDialog(QDialog):
 
     def _on_mouse_pressed_x(self, x, plot=None):
         track = self._track_for_plot(plot) if plot is not None else self._edit_track
+        
+        # 불러오지 않은 트랙은 선택할 수 없다.
+        if track == 1 and self.track1 is None:
+            return
+        if track == 2 and self.track2 is None:
+            return
+        
         self._sel_track = track
         self._selecting = True
         self._sel_start = x
@@ -877,6 +930,7 @@ class AudioEditorDialog(QDialog):
                 self.combo_target.setCurrentIndex(idx)
                 self.combo_target.blockSignals(False)
                 self._update_spin_ranges()
+            self._update_target_highlight()
         else:
             self._play_track = 3
 

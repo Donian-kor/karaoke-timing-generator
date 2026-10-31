@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QMessageBox,
     QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame,
 )
-from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QFont, QWheelEvent
+from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 SERVER_URL = "http://127.0.0.1:8000"
@@ -260,6 +260,7 @@ class MainWindow(QWidget):
         self._preview_timer = None
         self._settings = self._load_settings()
         self._preview_parsed = []
+        self._last_highlight_block = None
         self._lrc_before_edit = ""
         self._color_state = self._settings.get("colors", {"current": "#fbbf24", "past": "#6b7280", "future": "#ffffff"})
         self._font_sizes = self._settings.get("font_sizes", {"lyrics": 13, "preview": 13})
@@ -850,7 +851,8 @@ class MainWindow(QWidget):
         if info is None:
             # 서버가 꺼져 있으면 자동으로 시작하고, 준비된 뒤 생성을 이어간다.
             self._pending_generate = True
-            self.status_label.setText("서버가 꺼져 있어 자동으로 시작합니다...")
+            self.btn_gen.setEnabled(False)  # 서버 시작 중에는 중복 실행 방지
+            self.status_label.setText("서버가 실행 중이 아닙니다. 서버를 시작하는 중입니다...")
             self.start_server()
             return
 
@@ -1148,7 +1150,9 @@ class MainWindow(QWidget):
                 break
         if idx < 0 or pos < self._preview_parsed[0][0]:
             self.preview_lyric_label.setText("")
+            self._clear_preview_highlight()
         else:
+            self._highlight_preview_line(idx)
             start, end, words, full = self._preview_parsed[idx]
             parts = []
             for (wstart, wend, wtext) in words:
@@ -1160,6 +1164,38 @@ class MainWindow(QWidget):
                     parts.append(f'<span style="color:{self._color_state["future"]};">{wtext}</span>')
             self.preview_lyric_label.setText(" ".join(parts))
         pass
+
+    def _highlight_preview_line(self, line_index):
+        """preview QTextEdit에서 해당 줄을 하이라이트하고 스크롤한다."""
+        if line_index < 0:
+            return
+        doc = self.preview.document()
+        block = doc.firstBlock()
+        for i in range(line_index):
+            block = block.next()
+            if not block.isValid():
+                return
+        # 이전 하이라이트 제거
+        if self._last_highlight_block is not None and self._last_highlight_block.isValid():
+            prev_cursor = QTextCursor(self._last_highlight_block)
+            prev_cursor.select(QTextCursor.BlockUnderCursor)
+            prev_cursor.mergeCharFormat(QTextCharFormat())
+        # 현재 블록 하이라이트
+        cursor = QTextCursor(block)
+        cursor.select(QTextCursor.BlockUnderCursor)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(self._color_state.get("current", "#fbbf24")))
+        cursor.mergeCharFormat(fmt)
+        self._last_highlight_block = block
+        self.preview.setTextCursor(cursor)
+        self.preview.ensureCursorVisible()
+
+    def _clear_preview_highlight(self):
+        if self._last_highlight_block is not None and self._last_highlight_block.isValid():
+            cursor = QTextCursor(self._last_highlight_block)
+            cursor.select(QTextCursor.BlockUnderCursor)
+            cursor.mergeCharFormat(QTextCharFormat())
+            self._last_highlight_block = None
 
     def preview_play(self):
         audio_path = self.audio_edit.text().strip()
@@ -1181,6 +1217,7 @@ class MainWindow(QWidget):
             self._player.pause()
             if self._preview_timer is not None:
                 self._preview_timer.stop()
+        self._clear_preview_highlight()
 
     def preview_stop(self):
         if self._player is not None:
@@ -1189,6 +1226,7 @@ class MainWindow(QWidget):
             self._preview_timer.stop()
         self.preview_lyric_label.setText("")
         self.preview_time_label.setText("0:00.00 / 0:00.00")
+        self._clear_preview_highlight()
 
     def _on_speed_changed(self, text):
         rate = float(text.replace("x", ""))
