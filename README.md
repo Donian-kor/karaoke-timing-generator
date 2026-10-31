@@ -247,23 +247,25 @@ karaoke-timing-generator/
 
 아래는 소스 코드(`karaoke_gui.py`, `audio_editor.py`, `stt_server.py`)에서 실제로 `import`하는 패키지입니다.
 
-| 용도 | 패키지 | 라이선스 | 비고 |
-|---|---|---|---|
-| GUI 프레임워크 | PySide6 | GNU LGPL v3 | Qt Company, 메인 윈도우·위젯 |
-| 파형 그래프 | pyqtgraph | MIT License | 오디오 편집기 파형 위젯 |
-| 수치 계산 | NumPy | BSD-3-Clause License | 오디오 배열 연산 |
-| 리샘플링 | SciPy | BSD-3-Clause License | 트랙 간 샘플레이트 변환 |
-| 오디오 입출력 | soundfile | MIT License (바인딩) / libsndfile: GNU LGPL v2.1 또는 BSD | WAV/FLAC/MP3/OGG 읽기·쓰기 |
-| 잡음 제거 | noisereduce | MIT License | 오디오 편집기 잡음 제거 |
-| STT 모델 | faster-whisper / stable-whisper | MIT License | Whisper 기반 음성 인식 |
-| STT 서버 | FastAPI | MIT License | REST API 서버 |
-| ASGI 서버 | Uvicorn | BSD-3-Clause License | FastAPI 구동 서버 |
-| HTTP 클라이언트 | Requests | Apache License 2.0 | 서버에 오디오 전송 |
-| Python 표준 라이브러리 | os, sys, sqlite3, json, re, subprocess, time, difflib, shutil, glob, tempfile, ctypes, typing 등 | Python Software Foundation License | 파일·DB·쓰레드·FFmpeg DLL 제어 등 |
+| 용도 | 패키지 | 라이선스 | 상업적 사용 | 주요 유의사항 |
+|---|---|---|---|---|
+| GUI 프레임워크 | PySide6 | GNU LGPL v3 | 가능 | 라이브러리 자체를 수정했다면 수정 내역 공개 필요. 그대로 사용(동적 링크) 시 프로그램 소스 전체 공개 의무는 적음. |
+| 파형 그래프 | pyqtgraph | MIT License | 가능 | 저작권 표시와 라이선스 사본 유지. |
+| 수치 계산 | NumPy | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
+| 리샘플링 | SciPy | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
+| 오디오 입출력 | soundfile | MIT License (바인딩) / libsndfile: GNU LGPL v2.1 또는 BSD | 가능 | 하부 C 라이브러리가 LGPL일 수 있어, 라이브러리 자체를 수정했다면 조건 확인 필요. |
+| 잡음 제거 | noisereduce | MIT License | 가능 | 저작권 표시 유지. |
+| STT 모델 | faster-whisper / stable-whisper | MIT License | 가능 | 다운로드하는 모델 가중치 파일(Whisper 등)은 OpenAI 등 별도 라이선스 적용 가능. 모델 사용 전 확인 필요. |
+| STT 서버 | FastAPI | MIT License | 가능 | 저작권 표시 유지. |
+| ASGI 서버 | Uvicorn | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
+| HTTP 클라이언트 | Requests | Apache License 2.0 | 가능 | 특허 관련 조항과 저작권 표시 유지. |
+| Python 표준 라이브러리 | os, sys, sqlite3, json, re, subprocess, time, difflib, shutil, glob, tempfile, ctypes, typing 등 | Python Software Foundation License | 가능 | 파이썬 자체를 상업 프로그램에 포함해 사용 가능. |
 
 > 참고: `pydub`는 의존성 목록에서 빠졌습니다. 현재 코드에서 `import pydub`는 사용되지 않습니다.
 >
 > ACE-Step Studio는 제3자 애플리케이션이며, 이 프로그램에 포함되거나 배포되지 않습니다. 이 프로그램은 ACE-Step Studio의 데이터 파일(`library.sqlite`, `media/{id}.lrc`)을 **읽기 전용**으로 참조할 뿐입니다.
+>
+> ⚠️ **법적 고지**: 위 내용은 일반적인 정보이며 **법적 자문이 아닙니다**. 상업적 출시 전에는 반드시 변호사나 법무 전문가와 상의하시기 바랍니다.
 
 ---
 
