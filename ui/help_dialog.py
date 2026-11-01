@@ -178,8 +178,9 @@ class HelpDialog(QDialog):
         info_layout.setSpacing(4)
 
         author_label = QLabel("제작자: donian  |  GitHub: https://github.com/Donian-kor/karaoke-timing-generator")
-        author_label.setStyleSheet("font-size: 11px; color: #64748B;")
+        author_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #1E293B;")
         author_label.setWordWrap(True)
+        author_label.setAlignment(Qt.AlignCenter)
         info_layout.addWidget(author_label)
 
         license_label = QLabel(
@@ -189,6 +190,7 @@ class HelpDialog(QDialog):
         )
         license_label.setStyleSheet("font-size: 11px; color: #64748B;")
         license_label.setWordWrap(True)
+        license_label.setAlignment(Qt.AlignCenter)
         info_layout.addWidget(license_label)
 
         layout.addWidget(info_frame)
