@@ -1159,6 +1159,17 @@ class MainWindow(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+    # 중복 실행 방지: 이미 실행 중이면 메시지를 띄우고 종료
+    from PySide6.QtCore import QLockFile
+    import tempfile
+    lock_path = os.path.join(tempfile.gettempdir(), "karaoke-timing-generator.lock")
+    _instance_lock = QLockFile(lock_path)
+    if not _instance_lock.tryLock(100):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(None, "이미 실행 중", "프로그램이 이미 실행 중입니다.")
+        sys.exit(0)
+    # 락 객체가 가비지 컬렉션되지 않도록 보관
+    app._instance_lock = _instance_lock
     _apply_design_system(app)
     # ACE-Step Studio와 동일한 Inter 폰트 로드
     font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "Inter[opsz,wght].ttf")
