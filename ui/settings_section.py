@@ -57,12 +57,17 @@ class SettingsSection(QFrame):
 
         # 섹션 제목 행
         title_row = QHBoxLayout()
-        title = QLabel("오디오 파일 설정")
-        title.setProperty("sectionTitle", True)
-        title.setCursor(Qt.PointingHandCursor)
-        title.setToolTip("클릭하여 접기/펼치기")
-        title.mousePressEvent = lambda event: self._toggle_collapse()
-        title_row.addWidget(title)
+        self._title_btn = QPushButton("▼ 오디오 파일 설정")
+        self._title_btn.setFlat(True)
+        self._title_btn.setCursor(Qt.PointingHandCursor)
+        self._title_btn.setToolTip("클릭하여 접기/펼치기")
+        self._title_btn.setStyleSheet(
+            "QPushButton { font-size: 14px; font-weight: 800; color: #1976D2; "
+            "text-align: left; border: none; background: transparent; padding: 2px 0; }"
+            "QPushButton:hover { color: #1565C0; }"
+        )
+        self._title_btn.clicked.connect(self._toggle_collapse)
+        title_row.addWidget(self._title_btn)
         title_row.addStretch(1)
         layout.addLayout(title_row)
         self._title_row = title_row
@@ -145,6 +150,9 @@ class SettingsSection(QFrame):
         row.addWidget(QLabel("ACE-Step 곡:"))
         self.song_combo = QComboBox()
         self.song_combo.addItem("(직접 입력)")
+        # 긴 곡 제목이 콤보박스/섹션의 권장 크기를 과도하게 키우지 않도록 조정
+        self.song_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.song_combo.setMinimumContentsLength(12)
         row.addWidget(self.song_combo, 1)
         btn_refresh = QPushButton("새로고침")
         btn_refresh.setMinimumWidth(100)
@@ -176,6 +184,10 @@ class SettingsSection(QFrame):
 
         self._collapsed = not self._collapsed
         self._content.setVisible(not self._collapsed)
+        if self._collapsed:
+            self._title_btn.setText("▶ 오디오 파일 설정")
+        else:
+            self._title_btn.setText("▼ 오디오 파일 설정")
         if self._collapsed:
             # 제목 행만 보이도록 최소 높이 설정
             # 콘텐츠 숨김 시 레이아웃 간격/마진 최소화

@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QSlider, QMessageBox,
+    QComboBox, QSlider, QMessageBox, QWidget,
 )
 
 
@@ -29,22 +29,39 @@ class PreviewSection(QFrame):
     slider_moved = Signal(int)
     speed_changed = Signal(str)
     color_changed = Signal(str)
+    collapsed_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("previewSection")
         self.setProperty("section", True)
 
+        self._expanded = False
         self._build_ui()
+        self.collapse()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
-        preview_title = QLabel("재생 미리보기")
-        preview_title.setProperty("sectionTitle", True)
-        layout.addWidget(preview_title)
+        # 접기/펼치기 가능한 제목 버튼
+        self._title_btn = QPushButton("▶ 재생 미리보기")
+        self._title_btn.setFlat(True)
+        self._title_btn.setCursor(Qt.PointingHandCursor)
+        self._title_btn.setStyleSheet(
+            "QPushButton { font-size: 14px; font-weight: 800; color: #1976D2; "
+            "text-align: left; border: none; background: transparent; padding: 2px 0; }"
+            "QPushButton:hover { color: #1565C0; }"
+        )
+        self._title_btn.clicked.connect(self.toggle)
+        layout.addWidget(self._title_btn)
+
+        # 접힐 내용 컨테이너
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(12)
 
         # 미리보기 가사 라벨
         self.preview_lyric_label = QLabel("")
@@ -57,20 +74,20 @@ class PreviewSection(QFrame):
             "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 20px; font-weight: 700; color: #1E293B; "
             "background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 1px solid #E2E8F0;"
         )
-        layout.addWidget(self.preview_lyric_label, 1)
+        self._content_layout.addWidget(self.preview_lyric_label, 1)
 
         # 재생 시간 라벨
         self.preview_time_label = QLabel("0:00.00 / 0:00.00")
         self.preview_time_label.setAlignment(Qt.AlignCenter)
         self.preview_time_label.setProperty("textColor", "secondary")
         self.preview_time_label.setStyleSheet("font-size: 16px; font-weight: 700;")
-        layout.addWidget(self.preview_time_label)
+        self._content_layout.addWidget(self.preview_time_label)
 
         # 재생 슬라이더 (seek)
         self.preview_slider = QSlider(Qt.Horizontal)
         self.preview_slider.setRange(0, 0)
         self.preview_slider.sliderMoved.connect(lambda pos: self.slider_moved.emit(pos))
-        layout.addWidget(self.preview_slider)
+        self._content_layout.addWidget(self.preview_slider)
 
         # 재생/맞춤 컨트롤 (1줄 레이아웃)
         prow_row = QHBoxLayout()
@@ -102,7 +119,40 @@ class PreviewSection(QFrame):
         self.color_combo.currentTextChanged.connect(lambda text: self.color_changed.emit(text))
         prow_row.addWidget(self.color_combo)
 
-        layout.addLayout(prow_row)
+        self._content_layout.addLayout(prow_row)
+
+        layout.addWidget(self._content, 1)
+
+    # ---------- 접기/펼치기 ----------
+
+    def expand(self) -> None:
+        self._content.setVisible(True)
+        self._content_layout.setSpacing(12)
+        self.layout().setSpacing(12)
+        self.layout().setContentsMargins(8, 8, 2, 8)
+        self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+        self._title_btn.setText("▼ 재생 미리보기")
+        self._expanded = True
+        self.collapsed_changed.emit(False)
+
+    def collapse(self) -> None:
+        self._content.setVisible(False)
+        self._content_layout.setSpacing(0)
+        self.layout().setSpacing(0)
+        self.layout().setContentsMargins(8, 4, 8, 4)
+        self.setMaximumHeight(65)
+        self._title_btn.setText("▶ 재생 미리보기")
+        self._expanded = False
+        self.collapsed_changed.emit(True)
+
+    def toggle(self) -> None:
+        if self._expanded:
+            self.collapse()
+        else:
+            self.expand()
+
+    def is_expanded(self) -> bool:
+        return self._expanded
 
     # ---------- 편의 메서드 (메인 윈도우에서 호출) ----------
 

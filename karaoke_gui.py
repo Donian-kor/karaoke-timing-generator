@@ -71,7 +71,7 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("로컬 노래방 타이밍 생성기 (stable-ts)")
-        self.resize(720, 600)
+        self.resize(1000, 600)
         self.server_proc = None
         self.worker = None
         self.result = None
@@ -178,7 +178,7 @@ class MainWindow(QWidget):
         )
         main_layout.addWidget(menubar)
 
-        main_layout.setContentsMargins(12, 8, 12, 12)
+        main_layout.setContentsMargins(4, 8, 4, 12)
         main_layout.setSpacing(8)
 
         # 설정 섹션 (SettingsSection 위젯)
@@ -255,6 +255,7 @@ class MainWindow(QWidget):
         self.preview_section.slider_moved.connect(self._on_slider_moved)
         self.preview_section.speed_changed.connect(self._on_speed_changed)
         self.preview_section.color_changed.connect(self._on_color_changed)
+        self.preview_section.collapsed_changed.connect(self._on_preview_collapsed)
 
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
@@ -287,6 +288,13 @@ class MainWindow(QWidget):
                 self.vsplitter.setSizes(saved)
             else:
                 self.vsplitter.setSizes([180, 250, 320])
+
+    def _on_preview_collapsed(self, collapsed):
+        """재생 미리보기 섹션 접기/펼치기 시 스플리터 크기를 조정한다."""
+        if collapsed:
+            self.vsplitter.setSizes([180, 65, 320])
+        else:
+            self.vsplitter.setSizes([180, 250, 320])
 
     def _on_health_checked(self, ok, model, compute_type):
         if ok:
@@ -583,6 +591,7 @@ class MainWindow(QWidget):
 
         self.progress.setVisible(True)
         self.lyrics_section.set_generating(True)
+        self.preview_section.expand()
         self.status_label.setText("타이밍 생성 중...")
         self.preview.clear()
 

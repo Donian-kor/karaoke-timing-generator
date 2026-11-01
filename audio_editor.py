@@ -365,7 +365,7 @@ class AudioEditorDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("오디오 편집기 (멀티트랙)")
-        self.resize(1000, 720)
+        self.resize(900, 700)
 
         # 트랙 데이터
         self.track1 = None   # 반주
@@ -394,7 +394,12 @@ class AudioEditorDialog(QDialog):
         self._loop_mode = False   # 선택 구간 반복 재생 모드
         self._loop_start = 0.0    # 반복 재생 구간 시작 위치 (원본 좌표)
 
-        self.setStyleSheet(_build_design_qss())
+        self.setStyleSheet(_build_design_qss() + "\n" + """
+        QMenu { padding: 4px; }
+        QMenu::item { padding: 6px 28px; margin: 2px 0; }
+        QMenu::item:selected { background-color: #DBEAFE; color: #1E3A8A; }
+        QMenu::item:pressed { background-color: #BFDBFE; }
+        """)
         self._build_ui()
 
     # ---------- UI ----------
@@ -411,6 +416,16 @@ class AudioEditorDialog(QDialog):
 
         # ── 메뉴바 (상단) ──
         menubar = QMenuBar(self)
+        menubar.setStyleSheet(
+            "QMenuBar { background: #F8FAFC; border-bottom: 1px solid #E2E8F0; padding: 2px; }"
+            "QMenuBar::item { padding: 4px 12px; border-radius: 4px; }"
+            "QMenuBar::item:selected { background-color: #E2E8F0; }"
+            "QMenuBar::item:pressed { background-color: #CBD5E1; }"
+            "QMenu { padding: 4px; }"
+            "QMenu::item { padding: 6px 28px; margin: 2px 0; }"
+            "QMenu::item:selected { background-color: #DBEAFE; color: #1E3A8A; }"
+            "QMenu::item:pressed { background-color: #BFDBFE; }"
+        )
         layout.addWidget(menubar)
 
         # 파일 메뉴
@@ -631,70 +646,75 @@ class AudioEditorDialog(QDialog):
         trim_layout.setContentsMargins(12, 10, 12, 10)
 
         # 1줄: 선택 구간 요약 + 트리밍 버튼들 (1줄로 통합)
-        trim_row = QHBoxLayout()
-        trim_row.addWidget(QLabel("선택 구간:"))
-        trim_row.addStretch(1)
+        trim_rows = QVBoxLayout()
+        trim_rows.setSpacing(6)
+
+        trim_row1 = QHBoxLayout()
+        trim_row1.setSpacing(4)
+        trim_row1.addStretch(1)
         btn_keep = QPushButton("선택 구간만 남기기")
         btn_keep.clicked.connect(self.trim_keep)
-        btn_keep.setProperty("secondary", True)
-        trim_row.addWidget(btn_keep)
+        btn_keep.setProperty("success", True)
+        trim_row1.addWidget(btn_keep)
         btn_export = QPushButton("선택 구간 내보내기")
         btn_export.clicked.connect(self.trim_export_selected)
         btn_export.setProperty("success", True)
-        trim_row.addWidget(btn_export)
+        trim_row1.addWidget(btn_export)
         btn_norm = QPushButton("정규화 (볼륨 최대치 맞춤)")
         btn_norm.clicked.connect(self.normalize_track)
         btn_norm.setProperty("success", True)
-        trim_row.addWidget(btn_norm)
+        trim_row1.addWidget(btn_norm)
         btn_fade = QPushButton("페이드 인/아웃")
         btn_fade.clicked.connect(self.fade_in_out)
         btn_fade.setProperty("success", True)
-        trim_row.addWidget(btn_fade)
+        trim_row1.addWidget(btn_fade)
         btn_loop = QPushButton("선택 구간 반복 재생")
         btn_loop.clicked.connect(self.loop_play)
         btn_loop.setProperty("success", True)
-        trim_row.addWidget(btn_loop)
+        trim_row1.addWidget(btn_loop)
         btn_denoise_file = QPushButton("파일 잡음 제거 (고급)")
         btn_denoise_file.setToolTip(
             "파일 전체를 스트리밍으로 처리합니다. 원본은 수정하지 않고 새 파일로 저장합니다.")
         btn_denoise_file.clicked.connect(self.open_denoise_dialog)
-        btn_denoise_file.setProperty("secondary", True)
-        trim_row.addWidget(btn_denoise_file)
+        btn_denoise_file.setProperty("success", True)
+        trim_row1.addWidget(btn_denoise_file)
+        trim_rows.addLayout(trim_row1)
+
+        trim_row2 = QHBoxLayout()
+        trim_row2.setSpacing(4)
+        trim_row2.addStretch(1)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
-        trim_row.addWidget(self.progress)
-        trim_layout.addLayout(trim_row)
-        layout.addWidget(trim_frame)
+        trim_row2.addWidget(self.progress)
 
-        # 믹싱 / 저장
-        mix_frame = QFrame()
-        mix_frame.setFrameShape(QFrame.StyledPanel)
-        mix_frame.setProperty("section", True)
-        mix_layout = QHBoxLayout(mix_frame)
         btn_mix = QPushButton("믹싱 미리보기 (1+2)")
         btn_mix.clicked.connect(self.mix_tracks)
-        btn_mix.setProperty("success", True)
-        mix_layout.addWidget(btn_mix)
+        trim_row2.addWidget(btn_mix)
+
         btn_save1 = QPushButton("1번 트랙 저장")
         btn_save1.clicked.connect(lambda: self.save_track(1))
         btn_save1.setProperty("secondary", True)
-        mix_layout.addWidget(btn_save1)
+        trim_row2.addWidget(btn_save1)
         btn_save2 = QPushButton("2번 트랙 저장")
         btn_save2.clicked.connect(lambda: self.save_track(2))
         btn_save2.setProperty("secondary", True)
-        mix_layout.addWidget(btn_save2)
+        trim_row2.addWidget(btn_save2)
         btn_save_both = QPushButton("두 트랙 따로 저장")
         btn_save_both.clicked.connect(self.save_both_tracks)
         btn_save_both.setProperty("secondary", True)
-        mix_layout.addWidget(btn_save_both)
+        trim_row2.addWidget(btn_save_both)
         btn_save_res = QPushButton("믹스 미리보기 저장")
         btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
         btn_save_res.clicked.connect(self.save_result)
         btn_save_res.setProperty("secondary", True)
-        mix_layout.addWidget(btn_save_res)
-        mix_layout.addStretch(1)
-        layout.addWidget(mix_frame)
+        trim_row2.addWidget(btn_save_res)
+        trim_row2.addStretch(1)
+
+        trim_rows.addLayout(trim_row2)
+        trim_layout.addLayout(trim_rows)
+        layout.addWidget(trim_frame)
+
 
         # 마우스로 파형 드래그 선택
         self._selecting = False
