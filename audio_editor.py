@@ -1433,11 +1433,16 @@ class AudioEditorDialog(QDialog):
         self._set_track(which, new_data, sr, f"클립보드 붙여넣기 ({len(segment)} 샘플 삽입)")
 
     def loop_play(self):
-        """선택 구간을 반복 재생한다."""
+        """선택 구간을 반복 재생한다 (두 트랙 동시 재생)."""
         which = self.combo_target.currentIndex() + 1
-        data = self.track1 if which == 1 else self.track2
-        sr = self.sr1 if which == 1 else self.sr2
+        # 두 트랙을 믹싱한 전체 재생 데이터를 먼저 만든다
+        data, sr = self._build_playback_data()
         if data is None:
+            QMessageBox.information(self, "정보", "반복 재생할 트랙이 없습니다.")
+            return
+        # 선택 구간은 대상 트랙의 타임라인을 기준으로 한다
+        target_data = self.track1 if which == 1 else self.track2
+        if target_data is None:
             QMessageBox.information(self, "정보", "반복 재생할 트랙이 없습니다.")
             return
         r = self._region_for_track(which).getRegion()
