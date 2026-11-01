@@ -202,6 +202,22 @@ class _SelectablePlot(pg.PlotWidget):
                 self.dialog.undo()
                 ev.accept()
                 return
+            # 방향키로 선택 구간 정밀 조정 (Shift+좌우: 끝점, 좌우: 시작점)
+            if ev.key() in (Qt.Key_Left, Qt.Key_Right):
+                shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                delta = 0.01
+                if ev.key() == Qt.Key_Left:
+                    if shift:
+                        self.dialog._adjust_selection_end(-delta)
+                    else:
+                        self.dialog._adjust_selection_start(-delta)
+                else:  # Qt.Key_Right
+                    if shift:
+                        self.dialog._adjust_selection_end(delta)
+                    else:
+                        self.dialog._adjust_selection_start(delta)
+                ev.accept()
+                return
         super().keyPressEvent(ev)
 
     def _x_from_event(self, ev):
@@ -241,6 +257,8 @@ class AudioEditorDialog(QDialog):
         self._edit_track = 1      # 편집 대상 트랙 (1/2)
         self._play_track = 1      # 재생 시작점을 가져올 트랙 (1/2/3)
         self._sel_track = 1       # 현재 드래그 중인 트랙
+        self._clipboard = None    # 구간 복사/붙여넣기 클립보드
+        self._loop_mode = False   # 선택 구간 반복 재생 모드
 
         self._build_ui()
 
@@ -300,17 +318,22 @@ class AudioEditorDialog(QDialog):
         self._setup_plot(self.plot2, "#bfdbfe", "#0f172a")
         self._setup_plot(self.plot3, "#ddd6fe", "#0f172a")
 
-        self.header1, self.vol1, self.mute1, self.solo1, self.info1 = self._make_track_header(
+        self.header1, self.vol1, self.mute1, self.solo1, self.info1, self.height1 = self._make_track_header(
             "반주 (Track 1)", "#99f6e4", "#0f766e")
-        self.header2, self.vol2, self.mute2, self.solo2, self.info2 = self._make_track_header(
+        self.header2, self.vol2, self.mute2, self.solo2, self.info2, self.height2 = self._make_track_header(
             "보컬 (Track 2)", "#bfdbfe", "#1d4ed8")
-        self.header3, self.vol3, self.mute3, self.solo3, self.info3 = self._make_track_header(
+        self.header3, self.vol3, self.mute3, self.solo3, self.info3, self.height3 = self._make_track_header(
             "믹싱 미리보기", "#ddd6fe", "#6d28d9")
         self.vol3.setEnabled(False)
         self.mute3.setEnabled(False)
         self.solo3.setEnabled(False)
         self.label1 = self.info1
         self.label2 = self.info2
+
+        # 트랙 높이 슬라이더와 플롯 높이 연결
+        self.height1.valueChanged.connect(lambda v: self.plot1.setFixedHeight(v))
+        self.height2.valueChanged.connect(lambda v: self.plot2.setFixedHeight(v))
+        self.height3.valueChanged.connect(lambda v: self.plot3.setFixedHeight(v))
 
         # 볼륨/M/S 변경 시 재생 중이면 현재 위치에서 다시 믹싱해 반영
         self._mix_timer = QTimer(self)
@@ -412,6 +435,24 @@ class AudioEditorDialog(QDialog):
         btn_cut = QPushButton("선택 구간 잘라내기")
         btn_cut.clicked.connect(self.trim_delete)
         trim_layout.addWidget(btn_cut)
+        btn_export = QPushButton("선택 구간 내보내기")
+        btn_export.clicked.connect(self.trim_export_selected)
+        trim_layout.addWidget(btn_export)
+        btn_norm = QPushButton("정규화 (볼륨 최대치 맞춤)")
+        btn_norm.clicked.connect(self.normalize_track)
+        trim_layout.addWidget(btn_norm)
+        btn_fade = QPushButton("페이드 인/아웃")
+        btn_fade.clicked.connect(self.fade_in_out)
+        trim_layout.addWidget(btn_fade)
+        btn_copy = QPushButton("선택 구간 복사")
+        btn_copy.clicked.connect(self.copy_selection)
+        trim_layout.addWidget(btn_copy)
+        btn_paste = QPushButton("클립보드 붙여넣기")
+        btn_paste.clicked.connect(self.paste_clipboard)
+        trim_layout.addWidget(btn_paste)
+        btn_loop = QPushButton("선택 구간 반복 재생")
+        btn_loop.clicked.connect(self.loop_play)
+        trim_layout.addWidget(btn_loop)
         btn_undo = QPushButton("되돌리기 (Ctrl+Z)")
         btn_undo.clicked.connect(self.undo)
         trim_layout.addWidget(btn_undo)
@@ -524,8 +565,14 @@ class AudioEditorDialog(QDialog):
         info = QLabel("(없음)")
         info.setStyleSheet("color: #334155; border: none; font-size: 11px;")
         v.addWidget(info)
-        v.addStretch(1)
-        return frame, vol, mute, solo, info
+        # 트랙 높이 조절 슬라이더
+        height = QSlider(Qt.Horizontal)
+        height.setRange(50, 400)
+        height.setValue(120)
+        height.setFixedHeight(20)
+        height.setToolTip("트랙 높이 조절")
+        v.addWidget(height)
+        return frame, vol, mute, solo, info, height
 
     # ---------- 내부 헬퍼 ----------
     def _region_for_track(self, track):
@@ -867,8 +914,12 @@ class AudioEditorDialog(QDialog):
                 self._player.setPosition(seek)
                 self._pending_seek_ms = None
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
-            self.stop_playback()
-            self.status.setText("재생 완료")
+            if self._loop_mode:
+                self._player.setPosition(0)
+                self._player.play()
+            else:
+                self.stop_playback()
+                self.status.setText("재생 완료")
 
     def _on_slider_moved(self, value):
         if self._player is None or self._play_total_sec <= 0:
@@ -877,6 +928,7 @@ class AudioEditorDialog(QDialog):
         self._player.setPosition(pos_ms)
 
     def stop_playback(self):
+        self._loop_mode = False
         if self._player is not None:
             self._player.stop()
         self.play_slider.setValue(0)
@@ -1029,6 +1081,202 @@ class AudioEditorDialog(QDialog):
         else:
             new_data = np.concatenate([data[:i0], data[i1:]], axis=0)
         self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초 삭제")
+
+    def trim_export_selected(self):
+        """선택 구간을 별도 오디오 파일로 내보낸다."""
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        if e <= s:
+            QMessageBox.warning(self, "경고", "끝 시간이 시작 시간보다 커야 합니다.")
+            return
+        i0 = int(round(s * sr))
+        i1 = int(round(e * sr))
+        i0 = max(0, min(i0, len(data)))
+        i1 = max(0, min(i1, len(data)))
+        if i1 <= i0:
+            return
+        segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
+        # 원본 파일명 기준으로 기본 이름 생성
+        src_path = self.path1 if which == 1 else self.path2
+        name = "반주" if which == 1 else "보컬"
+        if src_path:
+            base = os.path.splitext(os.path.basename(src_path))[0]
+            default = f"{base}_{name}_선택구간_{s:.3f}~{e:.3f}초.wav"
+        else:
+            default = f"{name}_선택구간_{s:.3f}~{e:.3f}초.wav"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "선택 구간 내보내기", default,
+            "WAV (*.wav);;FLAC (*.flac);;MP3 (*.mp3);;OGG (*.ogg)")
+        if not path:
+            return
+        try:
+            sf.write(path, segment, sr)
+            self.status.setText(f"선택 구간 내보내기 완료: {path} ({e-s:.3f}초)")
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"내보내기 실패:\n{e}")
+
+    def normalize_track(self):
+        """선택된 트랙의 전체 볼륨을 최대치가 0dB(1.0)에 가깝게 맞춘다."""
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        peak = np.max(np.abs(data))
+        if peak <= 0 or peak >= 1.0:
+            self.status.setText("정규화 필요 없음 (이미 무음 또는 최대치 도달)")
+            return
+        self._push_history(which, data, sr)
+        normalized = data * (1.0 / peak)
+        self._set_track(which, normalized, sr, f"정규화 완료 (최대 볼륨 0dB로 맞춤)")
+
+    def fade_in_out(self):
+        """선택된 트랙 전체에 페이드 인(처음 1초)과 페이드 아웃(마지막 1초)을 적용한다."""
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        fade_sec = 1.0
+        n_fade = int(round(fade_sec * sr))
+        if n_fade <= 0:
+            return
+        n = len(data)
+        if n_fade * 2 >= n:
+            QMessageBox.warning(self, "경고", "오디오가 너무 짧아 페이드를 적용할 수 없습니다.")
+            return
+        self._push_history(which, data, sr)
+        faded = data.copy()
+        # 페이드 인: 처음 n_fade 샘플을 0→1로 선형 증가
+        ramp = np.linspace(0.0, 1.0, n_fade)
+        if np.ndim(data) == 1:
+            faded[:n_fade] = faded[:n_fade] * ramp
+            faded[-n_fade:] = faded[-n_fade:] * ramp[::-1]
+        else:
+            faded[:n_fade, :] = faded[:n_fade, :] * ramp[:, None]
+            faded[-n_fade:, :] = faded[-n_fade:, :] * ramp[::-1][:, None]
+        self._set_track(which, faded, sr, f"페이드 인/아웃 완료 (각 {fade_sec}초)")
+
+    def copy_selection(self):
+        """선택 구간 데이터를 클립보드에 복사한다."""
+        which, data, sr = self._current_track()
+        if data is None:
+            return
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        if e <= s:
+            QMessageBox.warning(self, "경고", "복사할 구간을 선택하세요.")
+            return
+        i0 = int(round(s * sr))
+        i1 = int(round(e * sr))
+        i0 = max(0, min(i0, len(data)))
+        i1 = max(0, min(i1, len(data)))
+        if i1 <= i0:
+            return
+        segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
+        self._clipboard = (which, segment.copy(), sr)
+        name = "반주" if which == 1 else "보컬"
+        self.status.setText(f"클립보드 복사: {name} {s:.3f}~{e:.3f}초 ({i1-i0} 샘플)")
+
+    def paste_clipboard(self):
+        """클립보드 데이터를 현재 선택 시작 위치에 삽입한다."""
+        if self._clipboard is None:
+            QMessageBox.warning(self, "경고", "클립보드에 복사한 구간이 없습니다.")
+            return
+        which, segment, sr = self._clipboard
+        _, data, track_sr = self._current_track()
+        if data is None:
+            return
+        if track_sr != sr:
+            QMessageBox.warning(self, "경고", "샘플레이트가 달라 붙여넣을 수 없습니다.")
+            return
+        r = self._region_for_track(which).getRegion()
+        insert_pos = float(r[0])
+        i0 = int(round(insert_pos * sr))
+        i0 = max(0, min(i0, len(data)))
+        self._push_history(which, data, sr)
+        if np.ndim(data) == 1:
+            new_data = np.concatenate([data[:i0], segment, data[i0:]])
+        else:
+            new_data = np.concatenate([data[:i0], segment, data[i0:]], axis=0)
+        self._set_track(which, new_data, sr, f"클립보드 붙여넣기 ({len(segment)} 샘플 삽입)")
+
+    def loop_play(self):
+        """선택 구간을 반복 재생한다."""
+        which = self.combo_target.currentIndex() + 1
+        data = self.track1 if which == 1 else self.track2
+        sr = self.sr1 if which == 1 else self.sr2
+        if data is None:
+            QMessageBox.information(self, "정보", "반복 재생할 트랙이 없습니다.")
+            return
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        if e <= s:
+            QMessageBox.warning(self, "경고", "반복 재생할 구간을 선택하세요.")
+            return
+        i0 = int(round(s * sr))
+        i1 = int(round(e * sr))
+        i0 = max(0, min(i0, len(data)))
+        i1 = max(0, min(i1, len(data)))
+        if i1 <= i0:
+            return
+        segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
+        # 기존 재생 정지 및 임시 파일 정리
+        if self._player is not None:
+            self._player.stop()
+        if self._temp_play and os.path.exists(self._temp_play):
+            try:
+                os.remove(self._temp_play)
+            except Exception:
+                pass
+        try:
+            fd, tmp = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+            sf.write(tmp, segment, sr)
+            self._temp_play = tmp
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"재생 준비 실패:\n{e}")
+            return
+        if self._player is None:
+            self._player = QMediaPlayer()
+            self._audio_out = QAudioOutput()
+            self._player.setAudioOutput(self._audio_out)
+            self._player.positionChanged.connect(self._on_position_changed)
+            self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._loop_mode = True
+        self._play_total_sec = len(segment) / sr
+        self._player.setSource(QUrl.fromLocalFile(tmp))
+        self._player.play()
+        self.status.setText(f"선택 구간 반복 재생 중... ({s:.3f}~{e:.3f}초)")
+
+    def _adjust_selection_start(self, delta):
+        """선택 구간 시작점을 delta초만큼 조정한다."""
+        which = self.combo_target.currentIndex() + 1
+        data = self.track1 if which == 1 else self.track2
+        if data is None:
+            return
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        new_s = max(0.0, s + delta)
+        if new_s >= e:
+            return
+        self._region_for_track(which).setRegion((new_s, e))
+        self._region_to_spins()
+
+    def _adjust_selection_end(self, delta):
+        """선택 구간 끝점을 delta초만큼 조정한다."""
+        which = self.combo_target.currentIndex() + 1
+        data = self.track1 if which == 1 else self.track2
+        sr = self.sr1 if which == 1 else self.sr2
+        if data is None:
+            return
+        dur = len(data) / sr
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
+        new_e = min(dur, e + delta)
+        if new_e <= s:
+            return
+        self._region_for_track(which).setRegion((s, new_e))
+        self._region_to_spins()
 
     def undo(self):
         if not self.history:
