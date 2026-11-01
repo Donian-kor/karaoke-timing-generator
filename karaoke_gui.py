@@ -22,6 +22,7 @@ from core.lrc_parser import (
 from ui.preview_section import PreviewSection
 from ui.settings_section import SettingsSection
 from ui.lyrics_section import LyricsSection
+from ui.lrc_highlighter import LrcHighlighter
 
 
 def _quiet_ffmpeg_noise():
@@ -61,28 +62,6 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 ACE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ACE-Step Studio", "data")
 ACE_MEDIA_DIR = os.path.join(ACE_DATA_DIR, "media")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
-
-
-class LrcHighlighter(QSyntaxHighlighter):
-    def __init__(self, document):
-        super().__init__(document)
-        self.ts_format = QTextCharFormat()
-        self.ts_format.setForeground(QColor("#60a5fa"))
-        self.ts_format.setFontWeight(QFont.Bold)
-        self.ts_pattern = QRegularExpression(r"\[\d+:\d+\.\d+\]")
-        self.word_format = QTextCharFormat()
-        self.word_format.setForeground(QColor("#f59e0b"))
-        self.word_pattern = QRegularExpression(r"<\d+:\d+\.\d+>")
-
-    def highlightBlock(self, text):
-        it = self.ts_pattern.globalMatch(text)
-        while it.hasNext():
-            m = it.next()
-            self.setFormat(m.capturedStart(), m.capturedLength(), self.ts_format)
-        it2 = self.word_pattern.globalMatch(text)
-        while it2.hasNext():
-            m = it2.next()
-            self.setFormat(m.capturedStart(), m.capturedLength(), self.word_format)
 
 
 class MainWindow(QWidget):
