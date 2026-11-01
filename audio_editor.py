@@ -10,7 +10,7 @@ import numpy as np
 import soundfile as sf
 
 from PySide6 import QtCore
-from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer, QSettings
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
@@ -42,24 +42,24 @@ _PG_TRANSLATIONS = {
 # ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
 DESIGN_TOKENS = {
     "colors": {
-        "primary": "#2563EB",
-        "primary_hover": "#1D4ED8",
-        "primary_pressed": "#1E40AF",
-        "accent": "#F97316",
-        "success": "#22C55E",
-        "danger": "#EF4444",
-        "warning": "#EAB308",
-        "neutral-50": "#F8FAFC",
-        "neutral-100": "#F1F5F9",
-        "neutral-200": "#E2E8F0",
-        "neutral-900": "#1E293B",
-        "text-secondary": "#64748B",
-        "border": "#E2E8F0",
+        "primary": "#1976D2",
+        "primary_hover": "#1565C0",
+        "primary_pressed": "#0D47A1",
+        "accent": "#FF4081",
+        "success": "#4CAF50",
+        "danger": "#F44336",
+        "warning": "#FFC107",
+        "neutral-50": "#FAFAFA",
+        "neutral-100": "#F5F5F5",
+        "neutral-200": "#EEEEEE",
+        "neutral-900": "#212121",
+        "text-secondary": "#757575",
+        "border": "#BDBDBD",
         "input_bg": "#FFFFFF",
-        "focus_ring": "#2563EB",
+        "focus_ring": "#1976D2",
     },
     "spacing": {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32},
-    "radius": {"sm": 4, "md": 8, "lg": 12},
+    "radius": {"sm": 4, "md": 4, "lg": 8},
     "font": {
         "size_small": 9,
         "size_base": 11,
@@ -93,15 +93,21 @@ def _build_design_qss() -> str:
             min-height: 28px;
         }}
         QPushButton:hover {{ background-color: {c['primary_hover']}; }}
-        QPushButton:pressed {{ background-color: {c['primary_pressed']}; }}
-        QPushButton:disabled {{ background-color: #94A3B8; }}
+        QPushButton:pressed {{ background-color: {c['primary_pressed']}; padding-top: 7px; padding-bottom: 5px; }}
+        QPushButton:disabled {{ background-color: #94A3B8; color: #F8FAFC; }}
+        QPushButton:focus {{ border: 2px solid {c['focus_ring']}; }}
         QPushButton[secondary="true"] {{
             background-color: {c['neutral-100']};
             color: {c['neutral-900']};
         }}
         QPushButton[secondary="true"]:hover {{ background-color: {c['neutral-200']}; }}
-        QPushButton[success="true"] {{ background-color: {c['success']}; }}
-        QPushButton[danger="true"] {{ background-color: {c['danger']}; }}
+        QPushButton[secondary="true"]:pressed {{ background-color: #CBD5E1; padding-top: 7px; padding-bottom: 5px; }}
+        QPushButton[success="true"] {{ background-color: {c['success']}; color: white; }}
+        QPushButton[success="true"]:hover {{ background-color: #16A34A; }}
+        QPushButton[success="true"]:pressed {{ background-color: #15803D; padding-top: 7px; padding-bottom: 5px; }}
+        QPushButton[danger="true"] {{ background-color: {c['danger']}; color: white; }}
+        QPushButton[danger="true"]:hover {{ background-color: #DC2626; }}
+        QPushButton[danger="true"]:pressed {{ background-color: #B91C1C; padding-top: 7px; padding-bottom: 5px; }}
         QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
             border: 1px solid {c['border']};
             border-radius: {r['sm']}px;
@@ -236,51 +242,19 @@ class _LoadTrackWorker(QThread):
             self.failed.emit(str(e))
 
 
-class _NoiseWorker(QThread):
-    finished = Signal(object, object, str)
-
-    def __init__(self, data, sr, noise_clip=None, stationary=False):
-        super().__init__()
-        self.data = data
-        self.sr = sr
-        self.noise_clip = noise_clip
-        self.stationary = stationary
-
-    def run(self):
-        try:
-            import noisereduce as nr
-            # 스테레오(2채널) 상태를 그대로 유지한다.
-            # noisereduce는 2차원 배열(샘플, 채널)을 지원하며,
-            # 좌우 채널을 각각 독립적으로 잡음 제거한다.
-            y = self.data.astype(np.float32)
-            if self.noise_clip is not None:
-                noise = self.noise_clip.astype(np.float32)
-                reduced = nr.reduce_noise(y=y, sr=self.sr, y_noise=noise)
-            else:
-                reduced = nr.reduce_noise(y=y, sr=self.sr, stationary=self.stationary)
-            self.finished.emit(reduced, self.sr, "잡음 제거 완료")
-        except Exception as e:
-            self.finished.emit(None, None, self._korean_error(str(e)))
-
-    @staticmethod
-    def _korean_error(msg: str) -> str:
-        """noisereduce 영어 오류를 한국어로 쉽게 바꾼다."""
-        if "Unable to allocate" in msg:
-            return "잡음 제거 실패: 오디오 데이터가 너무 커서 메모리가 부족합니다.\n더 짧은 오디오 파일을 사용해 주세요."
-        if "noverlap must be less than nperseg" in msg:
-            return "잡음 제거 실패: 시스템 라이브러리 버전 문제로 작동하지 않습니다.\n'잡음 구간으로 제거' 버튼을 사용해 보세요."
-        if "nperseg" in msg or "nfft" in msg:
-            return "잡음 제거 실패: 오디오 길이가 너무 짧거나 시스템 라이브러리 문제입니다.\n길이가 1초 이상인 구간을 선택해 주세요."
-        if "memory" in msg.lower() or "allocate" in msg.lower():
-            return "잡음 제거 실패: 메모리가 부족합니다.\n더 짧은 오디오 파일을 사용해 주세요."
-        return f"잡음 제거 실패: {msg}"
-
-
 class _SelectablePlot(pg.PlotWidget):
     """마우스 드래그로 구간을 선택할 수 있는 파형 플롯."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dialog = None
+
+    def event(self, ev):
+        # QGraphicsView/Scene가 ShortcutOverride를 가로채면 창 단축키
+        # (Ctrl+C/V/X/Z, Del)가 파형 위에서 동작하지 않는다. 단축키를 양보한다.
+        if ev.type() == QtCore.QEvent.ShortcutOverride:
+            ev.ignore()
+            return True
+        return super().event(ev)
 
     def mousePressEvent(self, ev):
         super().mousePressEvent(ev)
@@ -329,6 +303,34 @@ class _SelectablePlot(pg.PlotWidget):
                 return
         super().keyPressEvent(ev)
 
+    def wheelEvent(self, ev):
+        # Ctrl + 마우스 휠: 파형 가로축 확대/축소
+        if ev.modifiers() & Qt.ControlModifier:
+            delta = ev.angleDelta().y()
+            if delta == 0:
+                super().wheelEvent(ev)
+                return
+            vb = self.getViewBox()
+            x_min, x_max = vb.viewRange()[0]
+            span = x_max - x_min
+            if span <= 0:
+                super().wheelEvent(ev)
+                return
+            pos = ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
+            scene_pos = self.mapToScene(pos)
+            x_mouse = float(vb.mapSceneToView(scene_pos).x())
+            factor = 0.8 if delta > 0 else 1.25
+            new_span = span * factor
+            # 너무 과도한 확대/축소 방지
+            new_span = max(1e-4, min(new_span, 1e9))
+            ratio = (x_mouse - x_min) / span
+            new_min = x_mouse - ratio * new_span
+            new_max = new_min + new_span
+            vb.setXRange(new_min, new_max, padding=0)
+            ev.accept()
+            return
+        super().wheelEvent(ev)
+
     def _x_from_event(self, ev):
         try:
             scene_pos = self.mapToScene(ev.pos())
@@ -358,7 +360,7 @@ class AudioEditorDialog(QDialog):
         self._player = None
         self._audio_out = None
         self._temp_play = None
-        self._worker = None
+        self._settings = QSettings("KaraokeTimingGenerator", "AudioEditor")
         self._syncing_region = False
         self._play_total_sec = 0.0
         self._pending_seek_ms = None
@@ -369,7 +371,7 @@ class AudioEditorDialog(QDialog):
         self._clipboard = None    # 구간 복사/붙여넣기 클립보드
         self._loop_mode = False   # 선택 구간 반복 재생 모드
 
-        _apply_design_system(QApplication.instance())
+        self.setStyleSheet(_build_design_qss())
         self._build_ui()
 
     # ---------- UI ----------
@@ -414,10 +416,10 @@ class AudioEditorDialog(QDialog):
         act_paste.setShortcut("Ctrl+V")
         act_paste.triggered.connect(self.paste_clipboard)
         act_cut = edit_menu.addAction("잘라내기(T)")
-        act_cut.setShortcut("Ctrl+T")
+        act_cut.setShortcut("Ctrl+X")
         act_cut.triggered.connect(self.trim_delete)
-        act_mute = edit_menu.addAction("음소거(M)")
-        act_mute.setShortcut("Ctrl+M")
+        act_mute = edit_menu.addAction("음소거(Del)")
+        act_mute.setShortcut("Del")
         act_mute.triggered.connect(self.delete_selection_silence)
         act_undo = edit_menu.addAction("되돌리기(Z)")
         act_undo.setShortcut("Ctrl+Z")
@@ -482,8 +484,11 @@ class AudioEditorDialog(QDialog):
         grid.setColumnStretch(1, 1)
 
         self.plot1 = _SelectablePlot()
+        self.plot1.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
         self.plot2 = _SelectablePlot()
+        self.plot2.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
         self.plot3 = _SelectablePlot()
+        self.plot3.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
         for p in (self.plot1, self.plot2, self.plot3):
             p.dialog = self
         self.plot2.setXLink(self.plot1)
@@ -524,11 +529,6 @@ class AudioEditorDialog(QDialog):
         grid.addWidget(self.plot1, 0, 1)
         grid.addWidget(self.header2, 1, 0)
         grid.addWidget(self.plot2, 1, 1)
-        # 선택 구간 시간 표시 (트랙2 우측 아래)
-        self.lbl_selection = QLabel("선택 구간: 드래그로 선택하세요")
-        self.lbl_selection.setProperty("accent", True)
-        self.lbl_selection.setStyleSheet("font-size: 11px; font-weight: bold; padding: 4px;")
-        grid.addWidget(self.lbl_selection, 2, 1)
         grid.addWidget(self.header3, 2, 0)
         grid.addWidget(self.plot3, 2, 1)
         grid.setRowStretch(0, 1)
@@ -591,6 +591,11 @@ class AudioEditorDialog(QDialog):
         target_row.addWidget(self.combo_target)
         target_row.addWidget(self.chk_link_selection)
         target_row.addStretch(1)
+        self.lbl_selection = QLabel("선택 구간: 드래그로 선택하세요")
+        self.lbl_selection.setProperty("accent", True)
+        self.lbl_selection.setStyleSheet("font-size: 11px; padding: 4px;")
+        self.lbl_selection.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        target_row.addWidget(self.lbl_selection)
         layout.addLayout(target_row)
 
         # 트리밍
@@ -638,14 +643,12 @@ class AudioEditorDialog(QDialog):
         noise_frame.setFrameShape(QFrame.StyledPanel)
         noise_frame.setProperty("section", True)
         noise_layout = QHBoxLayout(noise_frame)
-        btn_noise_sel = QPushButton("잡음 구간으로 제거")
-        btn_noise_sel.clicked.connect(self.noise_reduce_selected)
-        btn_noise_sel.setProperty("secondary", True)
-        noise_layout.addWidget(btn_noise_sel)
-        btn_noise_auto = QPushButton("자동 잡음 제거")
-        btn_noise_auto.clicked.connect(self.noise_reduce_auto)
-        btn_noise_auto.setProperty("secondary", True)
-        noise_layout.addWidget(btn_noise_auto)
+        btn_denoise_file = QPushButton("파일 잡음 제거 (고급)")
+        btn_denoise_file.setToolTip(
+            "파일 전체를 스트리밍으로 처리합니다. 원본은 수정하지 않고 새 파일로 저장합니다.")
+        btn_denoise_file.clicked.connect(self.open_denoise_dialog)
+        btn_denoise_file.setProperty("secondary", True)
+        noise_layout.addWidget(btn_denoise_file)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
@@ -685,13 +688,6 @@ class AudioEditorDialog(QDialog):
         self._selecting = False
         self._sel_start = 0.0
 
-        # 키보드 단축키
-        from PySide6.QtGui import QShortcut, QKeySequence
-        QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.delete_selection_silence)
-        QShortcut(QKeySequence.Undo, self, activated=self.undo)
-        QShortcut(QKeySequence.StandardKey.Copy, self, activated=self.copy_selection)
-        QShortcut(QKeySequence.StandardKey.Paste, self, activated=self.paste_clipboard)
-
         # 초기 편집 대상 트랙 강조
         self._update_target_highlight()
 
@@ -729,12 +725,22 @@ class AudioEditorDialog(QDialog):
         mute.setCheckable(True)
         mute.setFixedWidth(28)
         mute.setToolTip("M: 이 트랙 음소거")
-        mute.setStyleSheet("QPushButton:checked { background: #dc2626; color: white; font-weight: 700; }")
+        mute.setStyleSheet(
+            "QPushButton { background: #E5E7EB; color: #111827; font-weight: 700; "
+            "border: none; padding: 0; min-height: 24px; }"
+            "QPushButton:checked { background: #DC2626; color: white; }"
+            "QPushButton:hover { background: #D1D5DB; }"
+        )
         solo = QPushButton("S")
         solo.setCheckable(True)
         solo.setFixedWidth(28)
         solo.setToolTip("S: 이 트랙만 재생 (다른 트랙 음소거)")
-        solo.setStyleSheet("QPushButton:checked { background: #f59e0b; color: #111827; font-weight: 700; }")
+        solo.setStyleSheet(
+            "QPushButton { background: #E5E7EB; color: #111827; font-weight: 700; "
+            "border: none; padding: 0; min-height: 24px; }"
+            "QPushButton:checked { background: #F59E0B; color: #111827; }"
+            "QPushButton:hover { background: #D1D5DB; }"
+        )
         row.addWidget(mute)
         row.addWidget(solo)
         v.addLayout(row)
@@ -874,10 +880,14 @@ class AudioEditorDialog(QDialog):
     # ---------- 파일 ----------
     def open_track(self, which, path=None):
         if not path:
+            last_dir = self._settings.value("last_open_dir", "")
+            start = last_dir if last_dir else ""
             path, _ = QFileDialog.getOpenFileName(
-                self, "오디오 파일 선택", "", "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a);;All Files (*)")
+                self, "오디오 파일 선택", start, "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a);;All Files (*)")
         if not path:
             return
+        if os.path.isdir(os.path.dirname(path)):
+            self._settings.setValue("last_open_dir", os.path.dirname(path))
         self.progress.setVisible(True)
         self._load_worker = _LoadTrackWorker(path, which)
         self._load_worker.finished.connect(lambda data, sr, p, w=which: self._on_track_loaded(w, data, sr, p))
@@ -913,11 +923,16 @@ class AudioEditorDialog(QDialog):
             default = f"{base}_편집.wav"
         else:
             default = f"{name}_편집.wav"
+        last_dir = self._settings.value("last_save_dir", "")
+        start_dir = last_dir if last_dir else (os.path.dirname(src_path) if src_path else "")
+        start_path = os.path.join(start_dir, default) if start_dir else default
         path, _ = QFileDialog.getSaveFileName(
-            self, f"{which}번 트랙({name}) 저장", default,
+            self, f"{which}번 트랙({name}) 저장", start_path,
             "WAV (*.wav);;FLAC (*.flac);;MP3 (*.mp3);;OGG (*.ogg)")
         if not path:
             return
+        if os.path.isdir(os.path.dirname(path)):
+            self._settings.setValue("last_save_dir", os.path.dirname(path))
         try:
             # 다른 트랙과 섞지 않고, 이 트랙의 원래 샘플레이트 그대로 저장한다.
             sf.write(path, data, sr)
@@ -930,9 +945,12 @@ class AudioEditorDialog(QDialog):
         if self.track1 is None or self.track2 is None:
             QMessageBox.warning(self, "경고", "반주와 보컬을 모두 불러오세요.")
             return
-        folder = QFileDialog.getExistingDirectory(self, "두 트랙을 저장할 폴더 선택")
+        last_dir = self._settings.value("last_save_dir", "")
+        folder = QFileDialog.getExistingDirectory(self, "두 트랙을 저장할 폴더 선택", last_dir)
         if not folder:
             return
+        if os.path.isdir(folder):
+            self._settings.setValue("last_save_dir", folder)
         targets = [
             (os.path.join(folder, "반주_편집.wav"), self.track1, self.sr1),
             (os.path.join(folder, "보컬_편집.wav"), self.track2, self.sr2),
@@ -1256,11 +1274,16 @@ class AudioEditorDialog(QDialog):
         i1 = int(round(e * sr))
         i0 = max(0, min(i0, len(data)))
         i1 = max(0, min(i1, len(data)))
+        if i1 <= i0:
+            return
+        # 잘라내기는 삭제하면서 선택 구간을 클립보드에도 복사한다.
+        segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
+        self._clipboard = (which, segment.copy(), sr)
         if np.ndim(data) == 1:
             new_data = np.concatenate([data[:i0], data[i1:]])
         else:
             new_data = np.concatenate([data[:i0], data[i1:]], axis=0)
-        self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초 삭제")
+        self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초 삭제 (클립보드에 복사됨)")
 
     def trim_export_selected(self):
         """선택 구간을 별도 오디오 파일로 내보낸다."""
@@ -1287,11 +1310,15 @@ class AudioEditorDialog(QDialog):
             default = f"{base}_{name}_선택구간_{s:.3f}~{e:.3f}초.wav"
         else:
             default = f"{name}_선택구간_{s:.3f}~{e:.3f}초.wav"
+        last_dir = self._settings.value("last_save_dir", "")
+        start_path = os.path.join(last_dir, default) if last_dir else default
         path, _ = QFileDialog.getSaveFileName(
-            self, "선택 구간 내보내기", default,
+            self, "선택 구간 내보내기", start_path,
             "WAV (*.wav);;FLAC (*.flac);;MP3 (*.mp3);;OGG (*.ogg)")
         if not path:
             return
+        if os.path.isdir(os.path.dirname(path)):
+            self._settings.setValue("last_save_dir", os.path.dirname(path))
         try:
             sf.write(path, segment, sr)
             self.status.setText(f"선택 구간 내보내기 완료: {path} ({e-s:.3f}초)")
@@ -1465,74 +1492,20 @@ class AudioEditorDialog(QDialog):
         which, data, sr = self.history.pop()
         self._set_track(which, data, sr, "되돌리기 완료")
 
-    def noise_reduce_selected(self):
-        which, data, sr = self._current_track()
-        if data is None:
+    def open_denoise_dialog(self):
+        """현재 트랙의 원본 파일을 대상으로 파일 기반 잡음 제거 창을 연다."""
+        try:
+            from audio_denoise import DenoiseDialog
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"잡음 제거 모듈을 불러올 수 없습니다:\n{e}")
             return
-        # 선택된 구간만 무음(0)으로 만든다 (잡음 구간 제거)
-        r = self._region_for_track(which).getRegion()
-        s, e = float(r[0]), float(r[1])
-        if e <= s:
-            QMessageBox.warning(self, "경고", "잡음 제거할 구간을 드래그로 선택하세요.")
-            return
-        i0 = int(round(s * sr))
-        i1 = int(round(e * sr))
-        i0 = max(0, min(i0, len(data)))
-        i1 = max(0, min(i1, len(data)))
-        if i1 <= i0:
-            return
-        self._push_history(which, data, sr)
-        new_data = data.copy()
-        if np.ndim(data) == 1:
-            new_data[i0:i1] = 0
-        else:
-            new_data[i0:i1, :] = 0
-        self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초 잡음 제거 (길이 {len(data)/sr:.2f}초 유지)")
-
-    def noise_reduce_auto(self):
-        which, data, sr = self._current_track()
-        if data is None:
-            return
-        # 자동 잡음 제거는 메모리를 많이 사용하므로 30초 이하만 허용
-        dur = len(data) / sr
-        if dur > 30:
-            QMessageBox.warning(
-                self, "경고",
-                f"오디오 길이가 {dur:.1f}초로 깁니다.\n"
-                f"자동 잡음 제거는 메모리를 많이 사용해 실패할 수 있습니다.\n"
-                f"30초 이하 오디오를 사용하거나, '잡음 구간으로 제거' 버튼을 사용해 주세요."
-            )
-            return
-        self._run_noise(which, data, sr, None, True)
-
-    def _run_noise(self, which, data, sr, noise_clip, stationary):
-        # 데이터가 너무 길면 잡음 제거가 메모리 부족으로 실패할 수 있다.
-        dur = len(data) / sr
-        if dur > 60:
-            reply = QMessageBox.question(
-                self, "확인",
-                f"오디오 길이가 {dur:.1f}초로 깁니다.\n"
-                f"잡음 제거는 메모리를 많이 사용해 실패할 수 있습니다.\n"
-                f"계속하시겠습니까?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply != QMessageBox.Yes:
-                return
-        self._push_history(which, data, sr)
-        self.progress.setVisible(True)
-        self._worker = _NoiseWorker(data, sr, noise_clip, stationary)
-        self._worker.finished.connect(lambda d, s, m, w=which: self._on_noise_done(w, d, s, m))
-        self._worker.start()
-
-    def _on_noise_done(self, which, data, sr, msg):
-        self.progress.setVisible(False)
-        if data is None:
-            QMessageBox.critical(self, "오류", msg)
-            if self.history:
-                self.history.pop()
-            return
-        self._set_track(which, data, sr, msg)
+        dlg = DenoiseDialog(self)
+        path = self.path1 if self._edit_track == 1 else self.path2
+        if not path:
+            path = self.path1 or self.path2
+        if path and os.path.exists(path):
+            dlg.set_input_path(path)
+        dlg.exec()
 
     # ---------- 믹싱 ----------
     def mix_tracks(self):

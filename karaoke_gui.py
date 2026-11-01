@@ -40,24 +40,24 @@ _quiet_ffmpeg_noise()
 # ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
 DESIGN_TOKENS = {
     "colors": {
-        "primary": "#2563EB",
-        "primary_hover": "#1D4ED8",
-        "primary_pressed": "#1E40AF",
-        "accent": "#F97316",
-        "success": "#22C55E",
-        "danger": "#EF4444",
-        "warning": "#EAB308",
-        "neutral-50": "#F8FAFC",
-        "neutral-100": "#F1F5F9",
-        "neutral-200": "#E2E8F0",
-        "neutral-900": "#1E293B",
-        "text-secondary": "#64748B",
-        "border": "#E2E8F0",
+        "primary": "#1976D2",
+        "primary_hover": "#1565C0",
+        "primary_pressed": "#0D47A1",
+        "accent": "#FF4081",
+        "success": "#4CAF50",
+        "danger": "#F44336",
+        "warning": "#FFC107",
+        "neutral-50": "#FAFAFA",
+        "neutral-100": "#F5F5F5",
+        "neutral-200": "#EEEEEE",
+        "neutral-900": "#212121",
+        "text-secondary": "#757575",
+        "border": "#BDBDBD",
         "input_bg": "#FFFFFF",
-        "focus_ring": "#2563EB",
+        "focus_ring": "#1976D2",
     },
     "spacing": {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32},
-    "radius": {"sm": 4, "md": 8, "lg": 12},
+    "radius": {"sm": 4, "md": 4, "lg": 8},
     "font": {
         "size_small": 9,
         "size_base": 11,
@@ -92,15 +92,22 @@ def _build_design_qss() -> str:
             min-height: 28px;
         }}
         QPushButton:hover {{ background-color: {c['primary_hover']}; }}
-        QPushButton:pressed {{ background-color: {c['primary_pressed']}; }}
-        QPushButton:disabled {{ background-color: #94A3B8; }}
+        QPushButton:pressed {{ background-color: {c['primary_pressed']}; padding-top: 7px; padding-bottom: 5px; }}
+        QPushButton:disabled {{ background-color: #94A3B8; color: #F8FAFC; }}
+        QPushButton:focus {{ border: 2px solid {c['focus_ring']}; }}
         QPushButton[secondary="true"] {{
             background-color: {c['neutral-100']};
             color: {c['neutral-900']};
+            border: 1px solid {c['border']};
         }}
         QPushButton[secondary="true"]:hover {{ background-color: {c['neutral-200']}; }}
-        QPushButton[success="true"] {{ background-color: {c['success']}; }}
-        QPushButton[danger="true"] {{ background-color: {c['danger']}; }}
+        QPushButton[secondary="true"]:pressed {{ background-color: {c['neutral-300'] if 'neutral-300' in c else '#CBD5E1'}; padding-top: 7px; padding-bottom: 5px; }}
+        QPushButton[success="true"] {{ background-color: {c['success']}; color: white; }}
+        QPushButton[success="true"]:hover {{ background-color: #16A34A; }}
+        QPushButton[success="true"]:pressed {{ background-color: #15803D; padding-top: 7px; padding-bottom: 5px; }}
+        QPushButton[danger="true"] {{ background-color: {c['danger']}; color: white; }}
+        QPushButton[danger="true"]:hover {{ background-color: #DC2626; }}
+        QPushButton[danger="true"]:pressed {{ background-color: #B91C1C; padding-top: 7px; padding-bottom: 5px; }}
         QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
             border: 1px solid {c['border']};
             border-radius: {r['sm']}px;
@@ -116,6 +123,52 @@ def _build_design_qss() -> str:
             border: 1px solid {c['border']};
             border-radius: {r['md']}px;
             background-color: {c['neutral-50']};
+            margin-top: {round(s['lg'] * 0.3)}px;
+            margin-bottom: {round(s['lg'] * 0.3)}px;
+            padding: {round(s['md'] * 0.5)}px {round(s['md'] * 0.5)}px {round(s['xs'] * 0.5)}px {round(s['md'] * 0.5)}px;
+        }}
+        #settingsSection {{
+            background-color: #F0F7FF;
+        }}
+        #lyricsSection {{
+            background-color: #F5F3FF;
+        }}
+        #previewSection {{
+            background-color: #E8F5E9;
+        }}
+        QFrame[section="true"] QLabel[sectionTitle="true"] {{
+            font-size: {f['size_large']}pt;
+            font-weight: 800;
+            color: {c['primary']};
+            padding-left: {s['xs']}px;
+            padding-bottom: {s['xs']}px;
+            background-color: transparent;
+            border: none;
+            border-bottom: 2px solid {c['primary']};
+            margin-bottom: {s['sm']}px;
+        }}
+        QSlider::groove:horizontal {{
+            border: none;
+            height: 6px;
+            background: {c['neutral-200']};
+            border-radius: 3px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {c['primary']};
+            border: none;
+            width: 16px;
+            height: 16px;
+            margin: -5px 0;
+            border-radius: 8px;
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {c['primary_hover']};
+        }}
+        #previewSection QSlider::groove:horizontal {{
+            background: #4CAF50;
+        }}
+        #previewSection QSlider::handle:horizontal {{
+            background: #0D47A1;
         }}
         QScrollBar:vertical {{
             width: 10px;
@@ -383,7 +436,7 @@ class MainWindow(QWidget):
             data = {
                 "model": self.model_combo.currentText(),
                 "compute_type": self.compute_combo.currentText().split()[0],
-                "language": self.lang_combo.currentText(),
+                "language": self.lang_combo.currentData(),
                 "colors": dict(self._color_state),
                 "font_sizes": dict(self._font_sizes),
             }
@@ -432,7 +485,9 @@ class MainWindow(QWidget):
                         self.compute_combo.setCurrentIndex(i)
                         break
             if "language" in self._settings:
-                self.lang_combo.setCurrentText(self._settings["language"])
+                idx = self.lang_combo.findData(self._settings["language"])
+                if idx >= 0:
+                    self.lang_combo.setCurrentIndex(idx)
         except Exception:
             pass
 
@@ -445,6 +500,10 @@ class MainWindow(QWidget):
         top_layout = QVBoxLayout(top_widget)
         top_layout.setContentsMargins(16, 16, 16, 16)
         top_layout.setSpacing(12)
+
+        top_title = QLabel("오디오 파일 설정")
+        top_title.setProperty("sectionTitle", True)
+        top_layout.addWidget(top_title)
 
         row = QHBoxLayout()
         self.server_status = QLabel("서버 상태: 확인 중...")
@@ -476,8 +535,18 @@ class MainWindow(QWidget):
         row.setSpacing(8)
         row.addWidget(QLabel("언어:"))
         self.lang_combo = QComboBox()
-        self.lang_combo.addItems(["ko", "en", "ja", "zh", "es", "fr", "de", "ru"])
-        self.lang_combo.setFixedWidth(70)
+        for code, label in (
+            ("ko", "한국어"),
+            ("en", "영어"),
+            ("ja", "일본어"),
+            ("zh", "중국어"),
+            ("es", "스페인어"),
+            ("fr", "프랑스어"),
+            ("de", "독일어"),
+            ("ru", "러시아어"),
+        ):
+            self.lang_combo.addItem(label, code)
+        self.lang_combo.setFixedWidth(90)
         row.addWidget(self.lang_combo)
         self.lang_combo.currentTextChanged.connect(lambda _: self._save_settings())
         row.addWidget(QLabel("모델:"))
@@ -505,7 +574,7 @@ class MainWindow(QWidget):
         self.song_combo.addItem("(직접 입력)")
         row.addWidget(self.song_combo, 1)
         btn_refresh = QPushButton("새로고침")
-        btn_refresh.setFixedWidth(80)
+        btn_refresh.setMinimumWidth(100)
         btn_refresh.setProperty("secondary", True)
         btn_refresh.clicked.connect(self._load_ace_songs)
         row.addWidget(btn_refresh)
@@ -522,10 +591,16 @@ class MainWindow(QWidget):
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setProperty("secondary", True)
         row.addWidget(self.btn_cancel)
-        self.btn_audio_edit = QPushButton("오디오 편집")
+        self.btn_audio_edit = QPushButton("🎧 오디오 편집")
         self.btn_audio_edit.clicked.connect(self.open_audio_editor)
-        self.btn_audio_edit.setProperty("secondary", True)
+        self.btn_audio_edit.setProperty("success", True)
+        self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 110px;")
+        self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
         row.addWidget(self.btn_audio_edit)
+        self.btn_denoise = QPushButton("잡음 제거")
+        self.btn_denoise.clicked.connect(self.open_denoise)
+        self.btn_denoise.setProperty("secondary", True)
+        row.addWidget(self.btn_denoise)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
@@ -539,6 +614,10 @@ class MainWindow(QWidget):
         lyrics_layout = QVBoxLayout(lyrics_frame)
         lyrics_layout.setContentsMargins(16, 16, 16, 16)
         lyrics_layout.setSpacing(12)
+
+        lyrics_title = QLabel("가사 / LRC 편집")
+        lyrics_title.setProperty("sectionTitle", True)
+        lyrics_layout.addWidget(lyrics_title)
 
         split = QSplitter(Qt.Horizontal)
         left_widget = QWidget()
@@ -578,56 +657,50 @@ class MainWindow(QWidget):
         self.btn_revert.clicked.connect(self.revert_lrc)
         self.btn_revert.setProperty("secondary", True)
         btn_row.addWidget(self.btn_revert)
-        btn_row.addStretch(1)
-        lyrics_layout.addLayout(btn_row)
 
-        # 줄 시간 맞추기 & 노래 시작 자동 맞춤 (하단 섹션: 우측 정렬)
-        prow_row2 = QHBoxLayout()
-        prow_row2.addStretch(1)  # 우측 정렬
+        # 노래 시작 자동 맞춤을 원본 복원 우측으로 재배열
         self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
         self.btn_auto_offset.setToolTip(
             "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
         self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
-        prow_row2.addWidget(self.btn_auto_offset)
+        btn_row.addWidget(self.btn_auto_offset)
 
-        prow_row2.addWidget(QLabel("선택된 줄 맞춤(ms):"))
+        btn_row.addSpacing(16)
+
+        # 선택된 줄 맞춤 그룹 (상단 행으로 끌어올림)
+        btn_row.addWidget(QLabel("선택된 줄 맞춤(ms):"))
         self.line_offset_spin = QSpinBox()
         self.line_offset_spin.setRange(-5000, 5000)
         self.line_offset_spin.setSingleStep(10)
         self.line_offset_spin.setValue(0)
-        self.line_offset_spin.setFixedWidth(110)
-        prow_row2.addWidget(self.line_offset_spin)
+        self.line_offset_spin.setFixedWidth(55)
+        self.line_offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        btn_row.addWidget(self.line_offset_spin)
         self.btn_line_offset = QPushButton("현재 줄 적용")
         self.btn_line_offset.setToolTip(
             "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
         self.btn_line_offset.clicked.connect(self.apply_line_offset)
-        prow_row2.addWidget(self.btn_line_offset)
+        self.btn_line_offset.setProperty("secondary", True)
+        btn_row.addWidget(self.btn_line_offset)
 
-        # 타이밍 오프셋 (하단 섹션)
-        prow_row2.addWidget(QLabel("전체 줄 맞추기(ms):"))
+        btn_row.addSpacing(16)
+
+        # 전체 줄 맞추기 그룹 (상단 행으로 끌어올림)
+        btn_row.addWidget(QLabel("전체 줄 맞추기(ms):"))
         self.offset_spin = QSpinBox()
         self.offset_spin.setRange(-5000, 5000)
         self.offset_spin.setSingleStep(10)
         self.offset_spin.setValue(0)
-        self.offset_spin.setFixedWidth(110)
-        prow_row2.addWidget(self.offset_spin)
+        self.offset_spin.setFixedWidth(55)
+        self.offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        btn_row.addWidget(self.offset_spin)
         self.btn_offset = QPushButton("적용")
         self.btn_offset.clicked.connect(self.apply_offset)
         self.btn_offset.setProperty("secondary", True)
-        prow_row2.addWidget(self.btn_offset)
-        prow_row2.addWidget(QLabel("전체 줄 맞추기(ms):"))
-        self.offset_spin = QSpinBox()
-        self.offset_spin.setRange(-5000, 5000)
-        self.offset_spin.setSingleStep(10)
-        self.offset_spin.setValue(0)
-        self.offset_spin.setFixedWidth(110)
-        self.offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        prow_row2.addWidget(self.offset_spin)
-        self.btn_offset = QPushButton("적용")
-        self.btn_offset.clicked.connect(self.apply_offset)
-        prow_row2.addWidget(self.btn_offset)
+        btn_row.addWidget(self.btn_offset)
 
-        lyrics_layout.addLayout(prow_row2)
+        btn_row.addStretch(1)
+        lyrics_layout.addLayout(btn_row)
 
         # ── 재생 미리보기 섹션 ─────────────────────
         preview_frame = QFrame()
@@ -636,6 +709,10 @@ class MainWindow(QWidget):
         preview_layout = QVBoxLayout(preview_frame)
         preview_layout.setContentsMargins(16, 16, 16, 16)
         preview_layout.setSpacing(12)
+
+        preview_title = QLabel("재생 미리보기")
+        preview_title.setProperty("sectionTitle", True)
+        preview_layout.addWidget(preview_title)
 
         self.preview_lyric_label = QLabel("")
         self.preview_lyric_label.setAlignment(Qt.AlignCenter)
@@ -652,7 +729,7 @@ class MainWindow(QWidget):
         self.preview_time_label = QLabel("0:00.00 / 0:00.00")
         self.preview_time_label.setAlignment(Qt.AlignCenter)
         self.preview_time_label.setProperty("textColor", "secondary")
-        self.preview_time_label.setStyleSheet("font-size: 12px; font-weight: 600;")
+        self.preview_time_label.setStyleSheet("font-size: 16px; font-weight: 700;")
         preview_layout.addWidget(self.preview_time_label)
 
         # 재생 슬라이드바 (seek)
@@ -1028,7 +1105,7 @@ class MainWindow(QWidget):
         self.status_label.setText("타이밍 생성 중...")
         self.preview.clear()
 
-        self.worker = TranscribeWorker(audio_path, self.lang_combo.currentText(), self.lyrics_edit.toPlainText().strip())
+        self.worker = TranscribeWorker(audio_path, self.lang_combo.currentData(), self.lyrics_edit.toPlainText().strip())
         self.worker.progress.connect(lambda m: self.status_label.setText(m))
         self.worker.finished.connect(self.on_finished)
         self.worker.failed.connect(self.on_failed)
@@ -1182,6 +1259,19 @@ class MainWindow(QWidget):
         audio_path = self.audio_edit.text().strip()
         if audio_path and os.path.exists(audio_path):
             dlg.open_track(1, audio_path)
+        dlg.exec()
+
+    def open_denoise(self):
+        """파일 전체를 스트리밍으로 처리하는 잡음 제거 창을 연다."""
+        try:
+            from audio_denoise import DenoiseDialog
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"잡음 제거 모듈을 불러올 수 없습니다:\n{e}")
+            return
+        dlg = DenoiseDialog(self)
+        audio_path = self.audio_edit.text().strip()
+        if audio_path and os.path.exists(audio_path):
+            dlg.set_input_path(audio_path)
         dlg.exec()
 
     def _parse_lrc(self, text):

@@ -42,14 +42,33 @@ Audacity 스타일 멀티트랙 편집기. 반주(1번)와 보컬(2번) 파형�
 - **선택 구간 잘라내기 버튼**: 선택 구간을 제거하고 전체 길이를 줄임 (`Del` 음소거와 별도 기능)
 - **선택 구간만 남기기**: 선택 구간 외부는 잘라냄 (길이 변경됨)
 - **잡음 제거**:
-  - `잡음 구간으로 제거`: 드래그로 선택한 짧은 구간을 잡음 프로파일로 사용해 전체에서 잡음 제거
-  - `자동 잡음 제거`: 별도 구간 지정 없이 자동으로 잡음 제거
+  - `파일 잡음 제거 (고급)`: 파일 전체를 스트리밍으로 처리 (FFmpeg afftdn / DeepFilterNet, 원본 보호)
   - **스테레오(2채널) 오디오도 좌우 채널을 그대로 유지한 채 처리** (모노로 변환되지 않음)
 - **저장**:
   - `1번 트랙 저장` / `2번 트랙 저장`: 트랙별로 따로 저장 (믹싱하지 않음)
   - `두 트랙 따로 저장`: 반주와 보컬을 각각 별도 파일로 저장
   - `믹스 미리보기 저장`: 믹싱된 결과만 저장 (미리듣기용)
 - **큰 파일 로드 최적화**: 오디오 파일 읽기를 백그라운드 스레드로 처리해 큰 파일을 열어도 UI가 멈추지 않음
+
+### 3. 잡음 제거 (파일 스트리밍)
+메인 GUI의 **잡음 제거** 버튼 또는 오디오 편집기의 **파일 잡음 제거 (고급)** 버튼으로 실행합니다.
+
+- **기본 엔진**: FFmpeg `afftdn` — 일반 잡음·음악에 적합
+- **선택 엔진**: DeepFilterNet — 음성 전용 (별도 설치 필요)
+- **제거 강도 조절**: 0~100% (afftdn은 약 0~30dB, DeepFilterNet은 원본과의 혼합 비율)
+- **원본·결과 미리 듣기**: 처리 전 원본, 처리 후 결과 파일 재생
+- **진행률 표시 및 작업 취소**: 처리 중 취소하면 불완전한 출력 파일과 임시 파일을 삭제
+- **출력 경로·형식 선택**: WAV(24bit) / FLAC / MP3 / OGG / M4A
+- **스테레오 유지**: 채널 수와 원본 샘플레이트를 그대로 유지하고, `afftdn`의 `noise_link=average`로 좌우 채널 잡음 억제를 연동
+- **메모리 안정성**: 파일 전체를 메모리에 올리지 않고 FFmpeg가 스트리밍 처리하므로 파일 길이와 무관하게 메모리 사용량이 일정
+- **원본 보호**: 원본 파일은 읽기만 하며, 같은 경로 저장을 차단. 임시 파일을 검증(채널·샘플레이트·길이·디코딩)한 뒤 출력 경로로 이동
+- **라이선스 안내**: 잡음 제거 창의 `라이선스 고지` 버튼으로 사용 중인 구성요소의 라이선스와 FFmpeg 빌드 검사 결과를 확인할 수 있습니다. FFmpeg 빌드가 GPL/Nonfree이면 경고가 표시됩니다.
+- **안전 중단**: 처리 중 시스템 가용 메모리가 일정 수준 이하로 떨어지면 작업을 중단하고 임시 파일 정리
+
+> DeepFilterNet은 음성 전용이며 48kHz 입력을 사용합니다. 이 프로그램은 채널별로 48kHz 변환 후 처리하고 원래 샘플레이트/채널로 되돌립니다.
+> 설치: `pip install deepfilternet` 또는 DeepFilterNet의 `deep-filter` 실행 파일을 PATH에 추가
+>
+> 기본 엔진을 사용하려면 `ffmpeg.exe`와 `ffprobe.exe`가 PATH에 있거나 프로그램 폴더에 있어야 합니다.
 
 ---
 
@@ -88,6 +107,7 @@ Audacity 스타일 멀티트랙 편집기. 반주(1번)와 보컬(2번) 파형�
    - `선택 구간만 남기기`: 선택 구간 외 잘라내기
    - `되돌리기 (Ctrl+Z)`: 이전 상태로 되돌림
    - `잡음 구간으로 제거` / `자동 잡음 제거`: 잡음 감소
+   - `파일 잡음 제거 (고급)`: 파일 전체 스트리밍 잡음 제거 창 열기
 6. 재생:
    - `▶ 재생`: 선택된 트랙의 구간 시작점부터 재생 (핀포인트 클릭 시 해당 지점부터)
    - `믹싱 미리보기 (1+2)`: 두 트랙 믹스 재생
@@ -95,6 +115,24 @@ Audacity 스타일 멀티트랙 편집기. 반주(1번)와 보컬(2번) 파형�
    - `1번 트랙 저장` / `2번 트랙 저장`: 트랙별 저장 (권장)
    - `두 트랙 따로 저장`: 각각 별도 파일로 저장
    - `믹스 미리보기 저장`: 믹스된 결과만 저장
+
+---
+
+## 잡음 제거 사용 순서
+
+1. 메인 GUI에서 **잡음 제거** 버튼 클릭 (또는 오디오 편집기의 `파일 잡음 제거 (고급)`)
+2. `찾기`로 잡음 제거할 오디오 파일 선택
+3. 제거 엔진 선택:
+   - `FFmpeg afftdn`: 일반 잡음·음악 (설치 없이 사용)
+   - `DeepFilterNet`: 음성 전용 (별도 설치 필요)
+4. `제거 강도` 슬라이더 조절
+5. `출력 파일` 경로와 `파일 형식` 선택
+6. `▶ 원본 듣기`로 처리 전 상태 확인
+7. `잡음 제거 시작` → 진행률 확인
+   - 필요하면 `작업 취소` (임시 파일 자동 삭제)
+8. 완료 후 `▶ 결과 듣기`로 결과 확인
+
+> 원본 파일은 절대 덮어쓰지 않습니다. 출력 경로가 원본과 같으면 저장이 차단됩니다.
 
 ---
 
@@ -240,10 +278,12 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 karaoke-timing-generator/
 ├── karaoke_gui.py      # PySide6 GUI (메인)
 ├── audio_editor.py     # 멀티트랙 오디오 편집기
+├── audio_denoise.py    # 파일 스트리밍 잡음 제거 (afftdn / DeepFilterNet)
 ├── stt_server.py       # FastAPI STT 서버 (faster-whisper)
 ├── run_karaoke.bat     # GUI 실행
 ├── run_server.bat      # 서버 실행
 ├── settings.json       # 사용자 설정 (자동 생성, 커밋되지 않음)
+├── THIRD_PARTY_LICENSES.md  # 서드파티 구성요소 라이선스 고지 (배포 시 함께 제공)
 ├── .gitignore          # Git 무시 파일
 └── README.md           # 이 파일
 ```
@@ -252,7 +292,7 @@ karaoke-timing-generator/
 
 ## 의존성
 
-아래는 소스 코드(`karaoke_gui.py`, `audio_editor.py`, `stt_server.py`)에서 실제로 `import`하는 패키지입니다.
+아래는 소스 코드(`karaoke_gui.py`, `audio_editor.py`, `audio_denoise.py`, `stt_server.py`)가 사용하는 주요 패키지와 외부 도구입니다.
 
 | 용도 | 패키지 | 라이선스 | 상업적 사용 | 주요 유의사항 |
 |---|---|---|---|---|
@@ -260,9 +300,12 @@ karaoke-timing-generator/
 | 파형 그래프 | pyqtgraph | MIT License | 가능 | 저작권 표시와 라이선스 사본 유지. |
 | 수치 계산 | NumPy | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
 | 리샘플링 | SciPy | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
-| 오디오 입출력 | soundfile | MIT License (바인딩) / libsndfile: GNU LGPL v2.1 또는 BSD | 가능 | 하부 C 라이브러리가 LGPL일 수 있어, 라이브러리 자체를 수정했다면 조건 확인 필요. |
+| 오디오 입출력 | soundfile | BSD-3-Clause License | 가능 | Python 바인딩은 BSD-3-Clause이며, 휠에 포함된 libsndfile은 LGPL v2.1입니다. |
+| 오디오 코덱 (하부) | libsndfile | GNU LGPL v2.1 | 가능 | soundfile 휠에 포함될 수 있습니다. 수정 시 LGPL 조건 적용. |
 | 잡음 제거 | noisereduce | MIT License | 가능 | 저작권 표시 유지. |
-| STT 모델 | faster-whisper / stable-whisper | MIT License | 가능 | 다운로드하는 모델 가중치 파일(Whisper 등)은 OpenAI 등 별도 라이선스 적용 가능. 모델 사용 전 확인 필요. |
+| 잡음 제거 (파일) | FFmpeg (`afftdn`) | LGPL v2.1+ (LGPL 빌드) / GPL v3 (GPL 빌드) | 빌드에 따름 | **상업 배포에는 `--enable-gpl`·`--enable-nonfree`가 없는 LGPL 빌드를 사용해야 합니다.** 이 프로그램은 FFmpeg를 별도 프로세스로 호출하며 링크하지 않습니다. |
+| 잡음 제거 (음성, 선택) | DeepFilterNet | MIT / Apache 2.0 (듀얼) | 가능 | 선택 설치. 공식 저장소의 모델 가중치도 동일한 듀얼 라이선스로 안내됩니다. 외부 변환 모델은 별도 확인. |
+| STT 모델 | faster-whisper / stable-whisper | MIT License | 가능 | 다운로드하는 Whisper 모델 가중치는 OpenAI 등 별도 라이선스 적용 가능. 재배포 전 확인 필요. |
 | STT 서버 | FastAPI | MIT License | 가능 | 저작권 표시 유지. |
 | ASGI 서버 | Uvicorn | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
 | HTTP 클라이언트 | Requests | Apache License 2.0 | 가능 | 특허 관련 조항과 저작권 표시 유지. |
@@ -276,14 +319,38 @@ karaoke-timing-generator/
 
 ---
 
+## FFmpeg 라이선스 확인 (배포 전 필수)
+
+이 프로그램은 FFmpeg를 **별도 프로세스로 실행**합니다. 상업적으로 배포하려면 LGPL 빌드를 사용해야 합니다.
+
+확인 명령:
+```bat
+ffmpeg -buildconf
+ffmpeg -L
+```
+
+- `configuration:` 목록에 `--enable-gpl` 또는 `--enable-nonfree`가 있으면 **배포용이 아닙니다.**
+- `--enable-version3`만 있는 경우 LGPL v3 빌드이므로 사용 가능합니다.
+- 이 프로그램의 잡음 제거 창은 FFmpeg 빌드를 자동으로 검사하고, GPL/Nonfree 빌드이면 경고를 표시합니다.
+
+이 저장소의 개발 환경에서 사용 중인 `ffmpeg-9.0.2-full_build`(Gyan.dev)는 `--enable-gpl --enable-version3` 빌드이며 `ffmpeg -L`이 GPL v3로 표시됩니다. **개인 사용은 가능하지만 배포에는 사용하지 마세요.** 배포 시에는 GPL/Nonfree 옵션이 없는 LGPL 빌드로 교체해야 합니다.
+
+자세한 라이선스 전문과 구성요소별 고지는 `THIRD_PARTY_LICENSES.md`를 참고하세요.
+
+---
+
 ## 라이선스
 
 이 프로젝트 소스 코드(`karaoke_gui.py`, `audio_editor.py`, `stt_server.py`, `README.md` 등)는 **MIT License** 하에 배포됩니다.
 
 단, 위 표에 명시된 각 외부 패키지는 해당 패키지 자체의 라이선스를 따릅니다. 프로그램을 수정·재배포할 때는 각 패키지 라이선스를 준수해야 합니다.
 
-- **PySide6 (LGPL v3)**: 소스 코드를 수정하지 않고 링크해서 사용하는 경우 소스 공개의 의무가 적습니다. Qt 자체를 수정하거나 정적 링크하는 경우 LGPL 조건을 확인하세요.
-- **soundfile**: Python 바인딩은 MIT이지만, 하부 C 라이브러리 `libsndfile`은 GNU LGPL v2.1 또는 BSD 중 하나를 따릅니다.
-- **OpenAI Whisper 모델 가중치**: `faster-whisper`가 다운로드하는 모델 파일은 OpenAI의 별도 라이선스(예: CC-BY-NC 등)가 적용될 수 있습니다. 모델 사용 전 라이선스를 확인하세요.
+**배포 정책**: 이 프로그램은 MIT License로 배포합니다. FFmpeg는 반드시 LGPL 빌드(`--enable-gpl`·`--enable-nonfree` 없음)만 함께 배포하며, GPL/Nonfree 빌드는 배포에 사용하지 않습니다.
 
-자세한 라이선스 전문은 각 패키지의 공식 문서 또는 설치된 패키지 내 `LICENSE` 파일을 참고하세요.
+- **PySide6 (LGPL v3)**: 소스 코드를 수정하지 않고 링크해서 사용하는 경우 소스 공개의 의무가 적습니다. Qt 자체를 수정하거나 정적 링크하는 경우 LGPL 조건을 확인하세요.
+- **soundfile**: Python 바인딩은 BSD-3-Clause이지만, 하부 C 라이브러리 `libsndfile`은 GNU LGPL v2.1을 따릅니다.
+- **OpenAI Whisper 모델 가중치**: `faster-whisper`가 다운로드하는 모델 파일은 OpenAI의 별도 라이선스(예: CC-BY-NC 등)가 적용될 수 있습니다. 모델 사용 전 라이선스를 확인하세요.
+- **FFmpeg**: 배포 전 `ffmpeg -buildconf`로 GPL/Nonfree 옵션을 확인하세요. 상세 내용은 위의 "FFmpeg 라이선스 확인" 절과 `THIRD_PARTY_LICENSES.md`를 참고하세요.
+- **DeepFilterNet**: 코드와 모델 가중치는 MIT/Apache-2.0 듀얼 라이선스입니다. 외부 변환 모델은 별도 확인하세요.
+
+자세한 라이선스 전문과 구성요소별 저작권 고지는 저장소의 `THIRD_PARTY_LICENSES.md`를 참고하세요.
