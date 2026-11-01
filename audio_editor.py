@@ -374,6 +374,12 @@ class AudioEditorDialog(QDialog):
         layout.setSpacing(6)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # 두 트랙 함께 선택 체크박스 (메뉴바에서 참조하므로 먼저 생성)
+        self.chk_link_selection = QCheckBox("두 트랙 함께 선택")
+        self.chk_link_selection.setToolTip(
+            "체크하면 한 트랙을 드래그할 때 반주와 보컬이 같은 구간으로 선택됩니다.")
+        self.chk_link_selection.toggled.connect(self._on_link_toggled)
+
         # ── 메뉴바 (상단) ──
         menubar = QMenuBar(self)
         layout.addWidget(menubar)
@@ -574,10 +580,6 @@ class AudioEditorDialog(QDialog):
         self.combo_target.addItems(["반주 (1번)", "보컬 (2번)"])
         self.combo_target.currentIndexChanged.connect(self._on_target_changed)
         target_row.addWidget(self.combo_target)
-        self.chk_link_selection = QCheckBox("두 트랙 함께 선택")
-        self.chk_link_selection.setToolTip(
-            "체크하면 한 트랙을 드래그할 때 반주와 보컬이 같은 구간으로 선택됩니다.")
-        self.chk_link_selection.toggled.connect(self._on_link_toggled)
         target_row.addWidget(self.chk_link_selection)
         target_row.addStretch(1)
         layout.addLayout(target_row)
