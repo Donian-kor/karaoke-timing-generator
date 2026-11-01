@@ -249,10 +249,9 @@ class _NoiseWorker(QThread):
     def run(self):
         try:
             import noisereduce as nr
-            # 스테레오(2채널) 상태를 그대로 유지한다.
-            # noisereduce는 2차원 배열(샘플, 채널)을 지원하며,
-            # 좌우 채널을 각각 독립적으로 잡음 제거한다.
-            y = self.data.astype(np.float32)
+            # noisereduce는 1차원(모노) 데이터에서 가장 안정적으로 작동한다.
+            # 스테레오 데이터는 메모리를 2배 사용하므로 자동 잡음 제거 시 모노로 변환한다.
+            y = _to_mono(self.data).astype(np.float32)
             if self.noise_clip is not None:
                 noise = self.noise_clip.astype(np.float32)
                 reduced = nr.reduce_noise(y=y, sr=self.sr, y_noise=noise)
@@ -269,6 +268,10 @@ class _NoiseWorker(QThread):
             return "잡음 제거 실패: 오디오 데이터가 너무 커서 메모리가 부족합니다.\n더 짧은 오디오 파일을 사용해 주세요."
         if "noverlap must be less than nperseg" in msg:
             return "잡음 제거 실패: 시스템 라이브러리 버전 문제로 작동하지 않습니다.\n'잡음 구간으로 제거' 버튼을 사용해 보세요."
+        if "nperseg" in msg or "nfft" in msg:
+            return "잡음 제거 실패: 오디오 길이가 너무 짧거나 시스템 라이브러리 문제입니다.\n길이가 1초 이상인 구간을 선택해 주세요."
+        if "memory" in msg.lower() or "allocate" in msg.lower():
+            return "잡음 제거 실패: 메모리가 부족합니다.\n더 짧은 오디오 파일을 사용해 주세요."
         return f"잡음 제거 실패: {msg}"
 
 
@@ -1465,7 +1468,7 @@ class AudioEditorDialog(QDialog):
         which, data, sr = self._current_track()
         if data is None:
             return
-        # 드래그로 선택한 구간을 잡음 프로파일로 사용
+        # 선택된 구간만 무음(0)으로 만든다 (잡음 구간 제거)
         r = self._region_for_track(which).getRegion()
         s, e = float(r[0]), float(r[1])
         if e <= s:
@@ -1475,12 +1478,29 @@ class AudioEditorDialog(QDialog):
         i1 = int(round(e * sr))
         i0 = max(0, min(i0, len(data)))
         i1 = max(0, min(i1, len(data)))
-        noise_clip = data[i0:i1]
-        self._run_noise(which, data, sr, noise_clip, False)
+        if i1 <= i0:
+            return
+        self._push_history(which, data, sr)
+        new_data = data.copy()
+        if np.ndim(data) == 1:
+            new_data[i0:i1] = 0
+        else:
+            new_data[i0:i1, :] = 0
+        self._set_track(which, new_data, sr, f"구간 {s:.3f}~{e:.3f}초 잡음 제거 (길이 {len(data)/sr:.2f}초 유지)")
 
     def noise_reduce_auto(self):
         which, data, sr = self._current_track()
         if data is None:
+            return
+        # 자동 잡음 제거는 메모리를 많이 사용하므로 30초 이하만 허용
+        dur = len(data) / sr
+        if dur > 30:
+            QMessageBox.warning(
+                self, "경고",
+                f"오디오 길이가 {dur:.1f}초로 깁니다.\n"
+                f"자동 잡음 제거는 메모리를 많이 사용해 실패할 수 있습니다.\n"
+                f"30초 이하 오디오를 사용하거나, '잡음 구간으로 제거' 버튼을 사용해 주세요."
+            )
             return
         self._run_noise(which, data, sr, None, True)
 
