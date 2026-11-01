@@ -60,9 +60,10 @@ async def transcribe_audio(
             result = model.transcribe_stable(
                 tmp_path,
                 language=language,
-                suppress_silence=False,
-                no_speech_threshold=1.0,
-                condition_on_previous_text=False,
+                suppress_silence=True,          # 무음 구간 억제로 정확도 향상
+                no_speech_threshold=0.6,        # 무음 판단 임계값 하향 (발화 민감도 ↑)
+                condition_on_previous_text=True,  # 이전 텍스트를 맥락으로 사용해 연속성 개선
+                temperature=0.0,                # 결정적 결과 선호 (싱크 안정성)
             )
 
         segments = []

@@ -9,6 +9,8 @@ import shutil
 import re
 import ctypes
 import glob
+import numpy as np
+import soundfile as sf
 
 
 def _quiet_ffmpeg_noise():
@@ -541,7 +543,12 @@ class MainWindow(QWidget):
         self.btn_offset = QPushButton("적용")
         self.btn_offset.clicked.connect(self.apply_offset)
         prow.addWidget(self.btn_offset)
-        # 색상 선택
+        self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
+        self.btn_auto_offset.setToolTip(
+            "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
+        self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
+        prow.addWidget(self.btn_auto_offset)
+        prow.addStretch(1)
         prow.addWidget(QLabel("색상:"))
         def make_color_btn(key, label):
             btn = QPushButton(label)
@@ -1274,6 +1281,66 @@ class MainWindow(QWidget):
         self._last_standard = new_txt
         self.offset_spin.setValue(0)
         self.status_label.setText(f"타이밍을 {ms:+d}ms 조정했습니다.")
+
+    def detect_audio_onset(self, audio_path):
+        """오디오에서 첫 발화 시작 시간을 초 단위로 추정한다."""
+        try:
+            data, sr = sf.read(audio_path, always_2d=False)
+            if data.ndim > 1:
+                data = np.mean(data, axis=1)  # 모노 변환
+            # 에너지 엔벨로프 (10ms 프레임 RMS)
+            frame_size = int(sr * 0.01)
+            n_frames = len(data) // frame_size
+            if n_frames == 0:
+                return 0.0
+            energy = np.sqrt(np.mean(data[:n_frames * frame_size].reshape(n_frames, frame_size) ** 2, axis=1))
+            max_energy = np.max(energy)
+            if max_energy <= 0:
+                return 0.0
+            threshold = max(max_energy * 0.05, 0.01)
+            onset_indices = np.where(energy > threshold)[0]
+            if len(onset_indices) == 0:
+                return 0.0
+            onset_frame = onset_indices[0]
+            return onset_frame * frame_size / sr
+        except Exception as e:
+            print(f"자동 오프셋 감지 오류: {e}")
+            return 0.0
+
+    def _get_first_word_timestamp(self, lrc_text):
+        """LRC 텍스트에서 첫 단어 타임스탬프(초)를 추출한다."""
+        import re
+        matches = re.findall(r"[\[<](\d+):(\d+)\.(\d+)", lrc_text)
+        if not matches:
+            return None
+        mm, ss, cc = matches[0]
+        frac = int(cc) / 1000.0 if len(cc) >= 3 else int(cc) / 100.0
+        return int(mm) * 60 + int(ss) + frac
+
+    def apply_auto_offset(self):
+        """오디오 첫 발화 지점을 분석해 오프셋을 자동으로 맞춘다."""
+        audio_path = self.audio_edit.text().strip()
+        if not audio_path or not os.path.exists(audio_path):
+            QMessageBox.warning(self, "경고", "오디오 파일을 선택하세요.")
+            return
+        lrc_text = self.preview.toPlainText()
+        if not lrc_text.strip():
+            QMessageBox.warning(self, "경고", "편집할 LRC 내용이 없습니다.")
+            return
+        onset_sec = self.detect_audio_onset(audio_path)
+        first_word_sec = self._get_first_word_timestamp(lrc_text)
+        if first_word_sec is None:
+            QMessageBox.warning(self, "경고", "LRC에 타임스탬프가 없습니다.")
+            return
+        # 오프셋 = 첫 발화 시간 - 첫 LRC 단어 시간 (발화가 빠르면 양수)
+        offset_ms = int(round((onset_sec - first_word_sec) * 1000))
+        offset_ms = max(-5000, min(5000, offset_ms))
+        self.offset_spin.setValue(offset_ms)
+        self.apply_offset()
+        self.status_label.setText(
+            f"노래 시작 자동 맞춤: {offset_ms:+d}ms "
+            f"(노래 시작 {onset_sec:.2f}초, 첫 가사 {first_word_sec:.2f}초)"
+        )
 
     def eventFilter(self, obj, event):
         preview = getattr(self, "preview", None)
