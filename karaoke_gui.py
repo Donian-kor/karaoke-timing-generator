@@ -183,6 +183,7 @@ class MainWindow(QWidget):
 
         # 설정 섹션 (SettingsSection 위젯)
         self.settings_section = SettingsSection()
+        self.settings_section.collapsed_changed.connect(self._on_settings_collapsed)
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
         self.server_status = self.settings_section.server_status
         self.btn_server_toggle = self.settings_section.btn_server_toggle
@@ -259,15 +260,15 @@ class MainWindow(QWidget):
 
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
-        vsplitter = QSplitter(Qt.Vertical)
-        vsplitter.addWidget(self.settings_section)
-        vsplitter.addWidget(self.preview_section)
-        vsplitter.addWidget(self.lyrics_section)
-        vsplitter.setSizes([180, 250, 320])
-        vsplitter.setStretchFactor(0, 0)
-        vsplitter.setStretchFactor(1, 1)
-        vsplitter.setStretchFactor(2, 1)
-        main_layout.addWidget(vsplitter, 1)
+        self.vsplitter = QSplitter(Qt.Vertical)
+        self.vsplitter.addWidget(self.settings_section)
+        self.vsplitter.addWidget(self.preview_section)
+        self.vsplitter.addWidget(self.lyrics_section)
+        self.vsplitter.setSizes([180, 250, 320])
+        self.vsplitter.setStretchFactor(0, 0)
+        self.vsplitter.setStretchFactor(1, 1)
+        self.vsplitter.setStretchFactor(2, 1)
+        main_layout.addWidget(self.vsplitter, 1)
 
         self._update_compute_combo()
         self.status_label = QLabel("")
@@ -277,6 +278,17 @@ class MainWindow(QWidget):
         self._health_worker = HealthCheckWorker()
         self._health_worker.finished.connect(self._on_health_checked)
         self._health_worker.start()
+
+    def _on_settings_collapsed(self, collapsed):
+        """설정 섹션 접기/펼치기 시 스플리터 크기를 조정한다."""
+        if collapsed:
+            self.vsplitter.setSizes([40, 280, 280])
+        else:
+            saved = getattr(self.settings_section, '_saved_sizes', None)
+            if saved:
+                self.vsplitter.setSizes(saved)
+            else:
+                self.vsplitter.setSizes([180, 250, 320])
 
     def _on_health_checked(self, ok, model, compute_type):
         if ok:

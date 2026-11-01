@@ -7,7 +7,7 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QFileDialog, QProgressBar, QComboBox, QLineEdit, QSpinBox,
 )
 
@@ -39,10 +39,14 @@ class SettingsSection(QFrame):
     song_refresh_clicked = Signal()
     settings_changed = Signal()
 
+    collapsed_changed = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("settingsSection")
         self.setProperty("section", True)
+        self._collapsed = False
+        self._content_widgets = []
 
         self._build_ui()
 
@@ -51,10 +55,25 @@ class SettingsSection(QFrame):
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
-        # 섹션 제목
+        # 섹션 제목 행 (제목 + 접기/펼치기 버튼)
+        title_row = QHBoxLayout()
         title = QLabel("오디오 파일 설정")
         title.setProperty("sectionTitle", True)
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        self.btn_collapse = QPushButton("▲ 접기")
+        self.btn_collapse.setProperty("secondary", True)
+        self.btn_collapse.setFixedWidth(70)
+        self.btn_collapse.clicked.connect(self._toggle_collapse)
+        title_row.addWidget(self.btn_collapse)
+        layout.addLayout(title_row)
+
+        # 콘텐츠 영역 (접기/펼치기 대상)
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(12)
+        layout.addWidget(self._content)
 
         # 0행: 서버 상태 + 서버 시작/상태 확인
         row = QHBoxLayout()
@@ -70,7 +89,7 @@ class SettingsSection(QFrame):
         self.btn_health.clicked.connect(lambda: self.health_check_clicked.emit())
         self.btn_health.setProperty("secondary", True)
         row.addWidget(self.btn_health)
-        layout.addLayout(row)
+        self._content_layout.addLayout(row)
 
         # 1행: 오디오 파일 선택
         row = QHBoxLayout()
@@ -81,7 +100,7 @@ class SettingsSection(QFrame):
         btn_browse.setProperty("secondary", True)
         btn_browse.clicked.connect(lambda: self.audio_browse_clicked.emit())
         row.addWidget(btn_browse)
-        layout.addLayout(row)
+        self._content_layout.addLayout(row)
 
         # 2행: 언어 / 모델 / 연산
         row = QHBoxLayout()
@@ -119,7 +138,7 @@ class SettingsSection(QFrame):
         self.compute_combo.currentTextChanged.connect(lambda _: self.settings_changed.emit())
 
         row.addStretch(1)
-        layout.addLayout(row)
+        self._content_layout.addLayout(row)
 
         # 3행: ACE-Step 곡 선택
         row = QHBoxLayout()
@@ -133,7 +152,7 @@ class SettingsSection(QFrame):
         btn_refresh.setProperty("secondary", True)
         btn_refresh.clicked.connect(lambda: self.song_refresh_clicked.emit())
         row.addWidget(btn_refresh)
-        layout.addLayout(row)
+        self._content_layout.addLayout(row)
         self.song_combo.currentIndexChanged.connect(lambda idx: self.song_selected.emit(idx))
 
         # 4행: 타이밍 생성 / 취소 / 오디오 편집 / 잡음 제거 / 진행률
@@ -165,7 +184,32 @@ class SettingsSection(QFrame):
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
         row.addWidget(self.progress, 1)
-        layout.addLayout(row)
+        self._content_layout.addLayout(row)
+
+    def _toggle_collapse(self):
+        """설정 섹션을 접거나 펼친다."""
+        # 접기 전에 현재 크기를 저장 (펼칠 때 복원용)
+        if not self._collapsed:
+            parent = self.parent()
+            if parent is not None:
+                # parent는 QSplitter이므로 sizes()를 직접 호출
+                try:
+                    self._saved_sizes = list(parent.sizes())
+                except Exception:
+                    self._saved_sizes = None
+
+        self._collapsed = not self._collapsed
+        self._content.setVisible(not self._collapsed)
+        if self._collapsed:
+            self.btn_collapse.setText("▼ 펼치기")
+            self.setMaximumHeight(40)
+        else:
+            self.btn_collapse.setText("▲ 접기")
+            self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+        self.collapsed_changed.emit(self._collapsed)
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
 
     # ---------- 편의 메서드 ----------
 
