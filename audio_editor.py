@@ -634,16 +634,6 @@ class AudioEditorDialog(QDialog):
         noise_frame.setFrameShape(QFrame.StyledPanel)
         noise_frame.setProperty("section", True)
         noise_layout = QHBoxLayout(noise_frame)
-        noise_layout.addWidget(QLabel("잡음 구간 시작(초):"))
-        self.spin_nstart = QDoubleSpinBox()
-        self.spin_nstart.setRange(0, 1e6)
-        self.spin_nstart.setDecimals(3)
-        noise_layout.addWidget(self.spin_nstart)
-        noise_layout.addWidget(QLabel("끝(초):"))
-        self.spin_nend = QDoubleSpinBox()
-        self.spin_nend.setRange(0, 1e6)
-        self.spin_nend.setDecimals(3)
-        noise_layout.addWidget(self.spin_nend)
         btn_noise_sel = QPushButton("잡음 구간으로 제거")
         btn_noise_sel.clicked.connect(self.noise_reduce_selected)
         btn_noise_sel.setProperty("secondary", True)
@@ -845,8 +835,6 @@ class AudioEditorDialog(QDialog):
                 self.region2.setRegion((0, min(1.0, dur)))
         if msg:
             self.status.setText(msg)
-        self._update_spin_ranges()
-        self.spin_nend.setValue(min(1.0, self.spin_nend.maximum()))
         # 스핀박스 값이 실제 선택 영역과 일치하도록 맞춘다.
         self._region_to_spins()
 
@@ -871,13 +859,8 @@ class AudioEditorDialog(QDialog):
         plot.setTitle(title)
 
     def _update_spin_ranges(self):
-        # 잡음 제거 구간 입력칸의 범위만 갱신한다.
-        t, data, sr = self._current_track()
-        if data is None:
-            return
-        dur = len(data) / sr
-        for sp in (self.spin_nstart, self.spin_nend):
-            sp.setRange(0, dur)
+        # 잡음 제거 구간 입력칸이 삭제되어 사용하지 않음
+        pass
 
     def _push_history(self, which, data, sr):
         self.history.append((which, data.copy() if data is not None else None, sr))
@@ -1482,10 +1465,11 @@ class AudioEditorDialog(QDialog):
         which, data, sr = self._current_track()
         if data is None:
             return
-        s = self.spin_nstart.value()
-        e = self.spin_nend.value()
+        # 드래그로 선택한 구간을 잡음 프로파일로 사용
+        r = self._region_for_track(which).getRegion()
+        s, e = float(r[0]), float(r[1])
         if e <= s:
-            QMessageBox.warning(self, "경고", "잡음 구간 끝이 시작보다 커야 합니다.")
+            QMessageBox.warning(self, "경고", "잡음 제거할 구간을 드래그로 선택하세요.")
             return
         i0 = int(round(s * sr))
         i1 = int(round(e * sr))
