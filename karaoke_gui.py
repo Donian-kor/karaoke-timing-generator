@@ -15,6 +15,7 @@ import soundfile as sf
 from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
 from core.transcribe_worker import SERVER_URL, TranscribeWorker
 from ui.preview_section import PreviewSection
+from ui.settings_section import SettingsSection
 
 
 def _quiet_ffmpeg_noise():
@@ -308,119 +309,23 @@ class MainWindow(QWidget):
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
-        # 설정 섹션
-        top_widget = QFrame()
-        top_widget.setObjectName("settingsSection")
-        top_widget.setProperty("section", True)
-        top_layout = QVBoxLayout(top_widget)
-        top_layout.setContentsMargins(16, 16, 16, 16)
-        top_layout.setSpacing(12)
+        # 설정 섹션 (SettingsSection 위젯)
+        self.settings_section = SettingsSection()
+        # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
+        self.server_status = self.settings_section.server_status
+        self.btn_server_toggle = self.settings_section.btn_server_toggle
+        self.btn_health = self.settings_section.btn_health
+        self.audio_edit = self.settings_section.audio_edit
+        self.lang_combo = self.settings_section.lang_combo
+        self.model_combo = self.settings_section.model_combo
+        self.compute_combo = self.settings_section.compute_combo
+        self.song_combo = self.settings_section.song_combo
+        self.btn_gen = self.settings_section.btn_gen
+        self.btn_cancel = self.settings_section.btn_cancel
+        self.btn_audio_edit = self.settings_section.btn_audio_edit
+        self.btn_denoise = self.settings_section.btn_denoise
+        self.progress = self.settings_section.progress
 
-        top_title = QLabel("오디오 파일 설정")
-        top_title.setProperty("sectionTitle", True)
-        top_layout.addWidget(top_title)
-
-        row = QHBoxLayout()
-        self.server_status = QLabel("서버 상태: 확인 중...")
-        self.server_status.setProperty("textColor", "secondary")
-        row.addWidget(self.server_status)
-        row.addStretch(1)
-        self.btn_server_toggle = QPushButton("서버 시작")
-        self.btn_server_toggle.clicked.connect(self._on_server_toggle)
-        self.btn_server_toggle.setProperty("success", True)
-        row.addWidget(self.btn_server_toggle)
-        self.btn_health = QPushButton("상태 확인")
-        self.btn_health.clicked.connect(self.check_health)
-        self.btn_health.setProperty("secondary", True)
-        row.addWidget(self.btn_health)
-        top_layout.addLayout(row)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("오디오 파일:"))
-        self.audio_edit = QLineEdit()
-        row.addWidget(self.audio_edit, 1)
-        btn_browse = QPushButton("찾기")
-        btn_browse.setProperty("secondary", True)
-        btn_browse.clicked.connect(self.browse_audio)
-        row.addWidget(btn_browse)
-        top_layout.addLayout(row)
-
-        # 1행: 언어 / 모델 / 연산
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addWidget(QLabel("언어:"))
-        self.lang_combo = QComboBox()
-        for code, label in (
-            ("ko", "한국어"),
-            ("en", "영어"),
-            ("ja", "일본어"),
-            ("zh", "중국어"),
-            ("es", "스페인어"),
-            ("fr", "프랑스어"),
-            ("de", "독일어"),
-            ("ru", "러시아어"),
-        ):
-            self.lang_combo.addItem(label, code)
-        self.lang_combo.setFixedWidth(90)
-        row.addWidget(self.lang_combo)
-        self.lang_combo.currentTextChanged.connect(lambda _: self._save_settings())
-        row.addWidget(QLabel("모델:"))
-        self.model_combo = QComboBox()
-        self.model_combo.addItems(["tiny", "base", "small", "medium", "large-v3"])
-        self.model_combo.setCurrentText("large-v3")
-        self.model_combo.setFixedWidth(100)
-        row.addWidget(self.model_combo)
-        self.model_combo.currentTextChanged.connect(lambda _: self._save_settings())
-        row.addWidget(QLabel("연산:"))
-        self.compute_combo = QComboBox()
-        self.compute_combo.addItems(["int8", "float16", "float32"])
-        self.compute_combo.setCurrentText("int8")
-        row.addWidget(self.compute_combo)
-        self.compute_combo.currentTextChanged.connect(lambda _: self._save_settings())
-        self.model_combo.currentTextChanged.connect(lambda _: self._update_compute_combo())
-        row.addStretch(1)
-        top_layout.addLayout(row)
-
-        # 2행: ACE-Step 곡 선택
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addWidget(QLabel("ACE-Step 곡:"))
-        self.song_combo = QComboBox()
-        self.song_combo.addItem("(직접 입력)")
-        row.addWidget(self.song_combo, 1)
-        btn_refresh = QPushButton("새로고침")
-        btn_refresh.setMinimumWidth(100)
-        btn_refresh.setProperty("secondary", True)
-        btn_refresh.clicked.connect(self._load_ace_songs)
-        row.addWidget(btn_refresh)
-        top_layout.addLayout(row)
-        self.song_combo.currentIndexChanged.connect(self._on_song_selected)
-
-        row = QHBoxLayout()
-        self.btn_gen = QPushButton("타이밍 생성")
-        self.btn_gen.clicked.connect(self.generate)
-        self.btn_gen.setProperty("success", True)
-        row.addWidget(self.btn_gen)
-        self.btn_cancel = QPushButton("취소")
-        self.btn_cancel.clicked.connect(self.cancel_generation)
-        self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setProperty("secondary", True)
-        row.addWidget(self.btn_cancel)
-        self.btn_audio_edit = QPushButton("🎧 오디오 편집")
-        self.btn_audio_edit.clicked.connect(self.open_audio_editor)
-        self.btn_audio_edit.setProperty("success", True)
-        self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 110px;")
-        self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
-        row.addWidget(self.btn_audio_edit)
-        self.btn_denoise = QPushButton("잡음 제거")
-        self.btn_denoise.clicked.connect(self.open_denoise)
-        self.btn_denoise.setProperty("secondary", True)
-        row.addWidget(self.btn_denoise)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setVisible(False)
-        row.addWidget(self.progress, 1)
-        top_layout.addLayout(row)
 
         # ── 가사 / LRC 섹션 (하단 프레임) ─────────────────────────
         lyrics_frame = QFrame()
@@ -523,7 +428,7 @@ class MainWindow(QWidget):
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
         vsplitter = QSplitter(Qt.Vertical)
-        vsplitter.addWidget(top_widget)
+        vsplitter.addWidget(self.settings_section)
         vsplitter.addWidget(self.preview_section)
         vsplitter.addWidget(lyrics_frame)
         vsplitter.setSizes([180, 250, 320])
