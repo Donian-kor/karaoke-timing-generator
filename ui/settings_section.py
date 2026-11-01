@@ -209,7 +209,7 @@ class SettingsSection(QFrame):
             self.layout().setSpacing(0)
             self.layout().setContentsMargins(8, 4, 8, 4)
             # 제목 행만 보이도록 높이 설정
-            self.setMaximumHeight(55)
+            self.setMaximumHeight(65)
         else:
             self.btn_collapse.setText("▲ 접기")
             self._content_layout.setSpacing(12)
