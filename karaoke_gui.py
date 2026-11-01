@@ -420,8 +420,8 @@ class MainWindow(QWidget):
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.status_label.setText("서버 시작 중... (모델 로딩에 시간이 걸릴 수 있습니다)")
-        self.btn_server.setEnabled(False)
-        self.btn_stop_server.setEnabled(True)
+        self.btn_server_toggle.setEnabled(False)
+        self.btn_server_toggle.setText("서버 시작 중...")
 
         self._start_worker = ServerStartWorker(
             sys.executable, script_dir,
@@ -431,8 +431,7 @@ class MainWindow(QWidget):
         self._start_worker.start()
 
     def _on_server_started(self, ok, msg):
-        self.btn_server.setEnabled(True)
-        self.btn_stop_server.setEnabled(True)
+        self.btn_server_toggle.setEnabled(True)
         worker = getattr(self, "_start_worker", None)
         if ok and worker is not None and worker.proc is not None:
             self.server_proc = worker.proc
