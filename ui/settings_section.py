@@ -5,7 +5,7 @@
 타이밍 생성/취소/오디오 편집/잡음 제거 버튼, 진행률 바를 포함한다.
 """
 
-from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QFileDialog, QProgressBar, QComboBox, QLineEdit, QSpinBox,
@@ -60,7 +60,7 @@ class SettingsSection(QFrame):
         title = QLabel("오디오 파일 설정")
         title.setProperty("sectionTitle", True)
         title.setCursor(Qt.PointingHandCursor)
-        title.installEventFilter(self)
+        title.mousePressEvent = lambda event: self._toggle_collapse()
         title_row.addWidget(title)
         title_row.addStretch(1)
         self.btn_collapse = QPushButton("▲ 접기")
@@ -188,21 +188,6 @@ class SettingsSection(QFrame):
         self.progress.setVisible(False)
         row.addWidget(self.progress, 1)
         self._content_layout.addLayout(row)
-
-    def _on_title_clicked(self, event):
-        """제목 클릭 시 접기/펼치기 토글."""
-        if event.button() == Qt.LeftButton:
-            self._toggle_collapse()
-
-    def eventFilter(self, obj, event):
-        """제목 클릭 시 접기/펼치기 토글."""
-        if obj is self.findChild(__import__('PySide6.QtWidgets', fromlist=['QLabel']).QLabel, '', Qt.FindChildOption.FindChildrenRecursively) and obj is not self.btn_collapse and hasattr(obj, 'text'):
-            # Check if this is the title label (has sectionTitle property)
-            if obj.property('sectionTitle') is not None:
-                if event.type() == QEvent.MouseButtonPress and event.button == Qt.LeftButton:
-                    self._toggle_collapse()
-                    return True
-        return super().eventFilter(obj, event)
 
     def _toggle_collapse(self):
         """설정 섹션을 접거나 펼친다."""
