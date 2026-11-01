@@ -548,6 +548,22 @@ class MainWindow(QWidget):
             "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
         self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
         prow.addWidget(self.btn_auto_offset)
+
+        # 줄 시간 맞추기 (선택한 줄만 개별로 시간 조정)
+        prow.addWidget(QLabel("줄 시간 맞추기(ms):"))
+        self.line_offset_spin = QSpinBox()
+        self.line_offset_spin.setRange(-5000, 5000)
+        self.line_offset_spin.setSingleStep(10)
+        self.line_offset_spin.setValue(0)
+        self.line_offset_spin.setFixedWidth(110)
+        self.line_offset_spin.setStyleSheet(
+            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        prow.addWidget(self.line_offset_spin)
+        self.btn_line_offset = QPushButton("현재 줄 적용")
+        self.btn_line_offset.setToolTip(
+            "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
+        self.btn_line_offset.clicked.connect(self.apply_line_offset)
+        prow.addWidget(self.btn_line_offset)
         prow.addStretch(1)
         prow.addWidget(QLabel("색상:"))
         def make_color_btn(key, label):
@@ -1281,6 +1297,49 @@ class MainWindow(QWidget):
         self._last_standard = new_txt
         self.offset_spin.setValue(0)
         self.status_label.setText(f"타이밍을 {ms:+d}ms 조정했습니다.")
+
+    def apply_line_offset(self):
+        """편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춘다."""
+        ms = self.line_offset_spin.value()
+        if ms == 0:
+            QMessageBox.information(self, "정보", "조정할 시간이 0ms입니다.")
+            return
+        txt = self.preview.toPlainText()
+        if not txt.strip():
+            QMessageBox.warning(self, "경고", "편집할 LRC 내용이 없습니다.")
+            return
+        cursor = self.preview.textCursor()
+        lines = txt.splitlines(keepends=True)
+        if cursor.hasSelection():
+            start_pos = cursor.selectionStart()
+            end_pos = cursor.selectionEnd()
+            char_count = 0
+            start_line = 0
+            end_line = len(lines) - 1
+            for i, line in enumerate(lines):
+                line_len = len(line)
+                if char_count <= start_pos < char_count + line_len:
+                    start_line = i
+                if char_count < end_pos <= char_count + line_len:
+                    end_line = i
+                char_count += line_len
+        else:
+            block = cursor.block()
+            start_line = block.blockNumber()
+            end_line = start_line
+        new_lines = []
+        for i, line in enumerate(lines):
+            if start_line <= i <= end_line:
+                new_lines.append(self._shift_ts(line, ms))
+            else:
+                new_lines.append(line)
+        new_txt = "".join(new_lines)
+        self.preview.setPlainText(new_txt)
+        self._last_enhanced = new_txt
+        self._last_standard = new_txt
+        self.line_offset_spin.setValue(0)
+        self.status_label.setText(
+            f"{start_line + 1}번 줄부터 {end_line + 1}번 줄까지 {ms:+d}ms 조정했습니다.")
 
     def detect_audio_onset(self, audio_path):
         """오디오에서 첫 발화 시작 시간을 초 단위로 추정한다."""
