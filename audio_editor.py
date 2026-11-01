@@ -151,7 +151,7 @@ def _build_design_qss() -> str:
             border-radius: {r['md']}px;
         }}
         QFrame[selected="false"] {{
-            border: 1px solid {c['neutral-200']};
+            border: 3px solid {c['neutral-200']};
             border-radius: {r['md']}px;
         }}
         QScrollBar:vertical {{
@@ -616,7 +616,7 @@ class AudioEditorDialog(QDialog):
         target_row.addStretch(1)
         self.lbl_selection = QLabel("선택 구간: 드래그로 선택하세요")
         self.lbl_selection.setProperty("accent", True)
-        self.lbl_selection.setStyleSheet("font-size: 11px; padding: 4px;")
+        self.lbl_selection.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px;")
         self.lbl_selection.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         target_row.addWidget(self.lbl_selection)
         layout.addLayout(target_row)
@@ -826,11 +826,11 @@ class AudioEditorDialog(QDialog):
     def _update_target_highlight(self):
         """현재 편집 대상 트랙의 파형에 강조 테두리를 입힌다."""
         if self._edit_track == 1:
-            self.plot1.setProperty("selected", True)
-            self.plot2.setProperty("selected", False)
+            self.plot1.setStyleSheet("border: 3px solid #EF4444; border-radius: 4px;")
+            self.plot2.setStyleSheet("border: 3px solid #E2E8F0; border-radius: 4px;")
         else:
-            self.plot1.setProperty("selected", False)
-            self.plot2.setProperty("selected", True)
+            self.plot1.setStyleSheet("border: 3px solid #E2E8F0; border-radius: 4px;")
+            self.plot2.setStyleSheet("border: 3px solid #EF4444; border-radius: 4px;")
         self.plot1.style().unpolish(self.plot1)
         self.plot1.style().polish(self.plot1)
         self.plot2.style().unpolish(self.plot2)
