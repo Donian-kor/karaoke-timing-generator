@@ -477,6 +477,37 @@ class MainWindow(QWidget):
         btn_row.addWidget(self.btn_revert)
         lyrics_layout.addLayout(btn_row)
 
+        # 줄 시간 맞추기 & 노래 시작 자동 맞춤 (하단 섹션: 우측 정렬)
+        prow_row2 = QHBoxLayout()
+        prow_row2.addStretch(1)  # 우측 정렬
+        self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
+        self.btn_auto_offset.setToolTip(
+            "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
+        self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
+        prow_row2.addWidget(self.btn_auto_offset)
+
+        prow_row2.addWidget(QLabel("줄 시간 맞추기(ms):"))
+        self.line_offset_spin = QSpinBox()
+        self.line_offset_spin.setRange(-5000, 5000)
+        self.line_offset_spin.setSingleStep(10)
+        self.line_offset_spin.setValue(0)
+        self.line_offset_spin.setFixedWidth(110)
+        self.line_offset_spin.setStyleSheet(
+            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        prow_row2.addWidget(self.line_offset_spin)
+        self.btn_line_offset = QPushButton("현재 줄 적용")
+        self.btn_line_offset.setToolTip(
+            "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
+        self.btn_line_offset.clicked.connect(self.apply_line_offset)
+        prow_row2.addWidget(self.btn_line_offset)
+
+        # 오디오 편집 버튼
+        self.btn_audio_edit = QPushButton("오디오 편집")
+        self.btn_audio_edit.clicked.connect(self.open_audio_editor)
+        prow_row2.addWidget(self.btn_audio_edit)
+
+        lyrics_layout.addLayout(prow_row2)
+
         # ── 재생 미리보기 섹션 (상단 프레임) ─────────────────────
         preview_frame = QFrame()
         preview_frame.setObjectName("previewSection")
@@ -561,39 +592,7 @@ class MainWindow(QWidget):
         prow_row1.addWidget(make_color_btn("past", "지난"))
         prow_row1.addWidget(make_color_btn("future", "다가올"))
 
-        prow_row2 = QHBoxLayout()
-        self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
-        self.btn_auto_offset.setToolTip(
-            "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
-        self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
-        prow_row2.addWidget(self.btn_auto_offset)
-
-        # 줄 시간 맞추기 (선택한 줄만 개별로 시간 조정)
-        prow_row2.addWidget(QLabel("줄 시간 맞추기(ms):"))
-        self.line_offset_spin = QSpinBox()
-        self.line_offset_spin.setRange(-5000, 5000)
-        self.line_offset_spin.setSingleStep(10)
-        self.line_offset_spin.setValue(0)
-        self.line_offset_spin.setFixedWidth(110)
-        self.line_offset_spin.setStyleSheet(
-            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        prow_row2.addWidget(self.line_offset_spin)
-        self.btn_line_offset = QPushButton("현재 줄 적용")
-        self.btn_line_offset.setToolTip(
-            "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
-        self.btn_line_offset.clicked.connect(self.apply_line_offset)
-        prow_row2.addWidget(self.btn_line_offset)
-
-        # 오디오 편집 버튼 (맞춤 섹션으로 이동)
-        self.btn_audio_edit = QPushButton("오디오 편집")
-        self.btn_audio_edit.clicked.connect(self.open_audio_editor)
-        prow_row2.addWidget(self.btn_audio_edit)
-        prow_row2.addStretch(1)
-
-        prow_layout = QVBoxLayout()
-        prow_layout.addLayout(prow_row1)
-        prow_layout.addLayout(prow_row2)
-        preview_layout.addLayout(prow_layout)
+        preview_layout.addLayout(prow_row1)
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
         vsplitter = QSplitter(Qt.Vertical)
