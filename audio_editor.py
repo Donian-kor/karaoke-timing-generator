@@ -462,8 +462,6 @@ class AudioEditorDialog(QDialog):
         act_help = help_menu.addAction("사용 방법")
         act_help.setShortcut("F1")
         act_help.triggered.connect(self._show_help)
-        act_about = help_menu.addAction("정보(A)")
-        act_about.triggered.connect(self._show_about)
 
         # 상단 툴바
         toolbar = QHBoxLayout()
@@ -786,15 +784,6 @@ class AudioEditorDialog(QDialog):
         """도움말 다이얼로그를 표시한다."""
         from ui.help_dialog import HelpDialog
         HelpDialog(self).exec()
-
-    def _show_about(self):
-        """프로그램 정보 다이얼로그를 표시한다."""
-        QMessageBox.about(
-            self, "오디오 편집기 정보",
-            "로컬 노래방 타이밍 생성기 - 오디오 편집기\n\n"
-            "멀티트랙 파형 편집, 구간 자르기, 잡음 제거, 믹싱을 처리합니다.\n"
-            "Audacity 스타일 멀티트랙 편집을 Python으로 구현했습니다."
-        )
 
     # ---------- 내부 헬퍼 ----------
     def _region_for_track(self, track):
