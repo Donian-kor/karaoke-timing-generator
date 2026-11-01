@@ -109,76 +109,66 @@ class LyricsSection(QFrame):
         layout.addWidget(split, 1)
 
         # ── 버튼 행 (2줄로 나누어 가로 최소 폭을 줄임) ──
-        btns_layout = QVBoxLayout()
+        btns_layout = QHBoxLayout()
         btns_layout.setSpacing(6)
 
-        btn_row1 = QHBoxLayout()
-        btn_row1.setSpacing(6)
-
+                # All buttons added directly to btns_layout (single row)
         self.btn_apply = QPushButton("Ace Step Studio에 적용")
         self.btn_apply.clicked.connect(lambda: self.apply_clicked.emit())
         self.btn_apply.setProperty("success", True)
-        btn_row1.addWidget(self.btn_apply)
+        btns_layout.addWidget(self.btn_apply)
 
         self.btn_compare = QPushButton("LRC 비교")
         self.btn_compare.clicked.connect(lambda: self.compare_clicked.emit())
         self.btn_compare.setProperty("secondary", True)
-        btn_row1.addWidget(self.btn_compare)
+        btns_layout.addWidget(self.btn_compare)
 
         self.btn_revert = QPushButton("원본 복원")
         self.btn_revert.clicked.connect(lambda: self.revert_clicked.emit())
         self.btn_revert.setProperty("secondary", True)
-        btn_row1.addWidget(self.btn_revert)
+        btns_layout.addWidget(self.btn_revert)
 
         self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
         self.btn_auto_offset.setToolTip(
             "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
         self.btn_auto_offset.clicked.connect(lambda: self.auto_offset_clicked.emit())
-        btn_row1.addWidget(self.btn_auto_offset)
+        btns_layout.addWidget(self.btn_auto_offset)
 
-        btn_row1.addStretch(1)
-        btns_layout.addLayout(btn_row1)
+        btns_layout.addSpacing(50)
 
-        btn_row2 = QHBoxLayout()
-        btn_row2.setSpacing(6)
-
-        btn_row2.addWidget(QLabel("선택된 줄 맞춤(ms):"))
         self.line_offset_spin = QSpinBox()
         self.line_offset_spin.setRange(-5000, 5000)
         self.line_offset_spin.setSingleStep(10)
         self.line_offset_spin.setValue(0)
-        self.line_offset_spin.setFixedWidth(50)
+        self.line_offset_spin.setFixedWidth(80)
         self.line_offset_spin.setStyleSheet(
             "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        btn_row2.addWidget(self.line_offset_spin)
+        btns_layout.addWidget(self.line_offset_spin)
 
         self.btn_line_offset = QPushButton("현재 줄 적용")
         self.btn_line_offset.setToolTip(
             "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
         self.btn_line_offset.clicked.connect(lambda: self.line_offset_clicked.emit())
         self.btn_line_offset.setProperty("secondary", True)
-        btn_row2.addWidget(self.btn_line_offset)
+        btns_layout.addWidget(self.btn_line_offset)
 
-        btn_row2.addSpacing(6)
+        btns_layout.addSpacing(30)
 
-        btn_row2.addWidget(QLabel("전체 줄 맞추기(ms):"))
         self.offset_spin = QSpinBox()
         self.offset_spin.setRange(-5000, 5000)
         self.offset_spin.setSingleStep(10)
         self.offset_spin.setValue(0)
-        self.offset_spin.setFixedWidth(50)
+        self.offset_spin.setFixedWidth(80)
         self.offset_spin.setStyleSheet(
             "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        btn_row2.addWidget(self.offset_spin)
+        btns_layout.addWidget(self.offset_spin)
 
         self.btn_offset = QPushButton("적용")
         self.btn_offset.clicked.connect(lambda: self.offset_clicked.emit())
         self.btn_offset.setProperty("secondary", True)
-        btn_row2.addWidget(self.btn_offset)
+        btns_layout.addWidget(self.btn_offset)
 
-        btn_row2.addStretch(1)
-        btns_layout.addLayout(btn_row2)
-
+        btns_layout.addStretch(1)
         layout.addLayout(btns_layout)
 
     def set_generating(self, generating: bool) -> None:
