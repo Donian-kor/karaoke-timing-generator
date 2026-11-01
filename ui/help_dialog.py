@@ -169,6 +169,30 @@ class HelpDialog(QDialog):
         browser.setMarkdown(HELP_MARKDOWN)
         layout.addWidget(browser, 1)
 
+        # ── 제작자 / 라이선스 정보 ──
+        info_frame = QFrame()
+        info_frame.setFrameShape(QFrame.StyledPanel)
+        info_frame.setProperty("section", True)
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(12, 8, 12, 8)
+        info_layout.setSpacing(4)
+
+        author_label = QLabel("제작자: donian  |  GitHub: https://github.com/Donian-kor/karaoke-timing-generator")
+        author_label.setStyleSheet("font-size: 11px; color: #64748B;")
+        author_label.setWordWrap(True)
+        info_layout.addWidget(author_label)
+
+        license_label = QLabel(
+            "라이선스: 이 프로젝트 소스 코드는 MIT License 하에 배포됩니다.\n"
+            "외부 패키지(PySide6, FFmpeg, DeepFilterNet 등)는 각자의 라이선스를 따릅니다.\n"
+            "자세한 내용은 THIRD_PARTY_LICENSES.md를 참고하세요."
+        )
+        license_label.setStyleSheet("font-size: 11px; color: #64748B;")
+        license_label.setWordWrap(True)
+        info_layout.addWidget(license_label)
+
+        layout.addWidget(info_frame)
+
         row = QHBoxLayout()
         row.addStretch(1)
         btn_close = QPushButton("닫기")
