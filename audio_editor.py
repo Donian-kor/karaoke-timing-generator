@@ -649,6 +649,7 @@ class AudioEditorDialog(QDialog):
         from PySide6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.delete_selection_silence)
         QShortcut(QKeySequence.Undo, self, activated=self.undo)
+        QShortcut(QKeySequence.StandardKey.Copy, self, activated=self.copy_selection)
         QShortcut(QKeySequence.StandardKey.Paste, self, activated=self.paste_clipboard)
 
         # 초기 편집 대상 트랙 강조
