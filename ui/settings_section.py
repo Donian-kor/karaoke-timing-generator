@@ -154,31 +154,8 @@ class SettingsSection(QFrame):
         self._content_layout.addLayout(row)
         self.song_combo.currentIndexChanged.connect(lambda idx: self.song_selected.emit(idx))
 
-        # 4행: 타이밍 생성 / 취소 / 오디오 편집 / 잡음 제거 / 진행률
+        # 4행: 진행률 표시
         row = QHBoxLayout()
-        self.btn_gen = QPushButton("타이밍 생성")
-        self.btn_gen.clicked.connect(lambda: self.generate_clicked.emit())
-        self.btn_gen.setProperty("success", True)
-        row.addWidget(self.btn_gen)
-
-        self.btn_cancel = QPushButton("취소")
-        self.btn_cancel.clicked.connect(lambda: self.cancel_clicked.emit())
-        self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setProperty("secondary", True)
-        row.addWidget(self.btn_cancel)
-
-        self.btn_audio_edit = QPushButton("🎧 오디오 편집")
-        self.btn_audio_edit.clicked.connect(lambda: self.audio_edit_clicked.emit())
-        self.btn_audio_edit.setProperty("success", True)
-        self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 110px;")
-        self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
-        row.addWidget(self.btn_audio_edit)
-
-        self.btn_denoise = QPushButton("잡음 제거")
-        self.btn_denoise.clicked.connect(lambda: self.denoise_clicked.emit())
-        self.btn_denoise.setProperty("secondary", True)
-        row.addWidget(self.btn_denoise)
-
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)

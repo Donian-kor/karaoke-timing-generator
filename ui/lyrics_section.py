@@ -26,6 +26,10 @@ class LyricsSection(QFrame):
     auto_offset_clicked = Signal()
     line_offset_clicked = Signal()
     offset_clicked = Signal()
+    gen_clicked = Signal()
+    cancel_clicked = Signal()
+    audio_edit_clicked = Signal()
+    denoise_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,9 +42,40 @@ class LyricsSection(QFrame):
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
+        # ── 제목 행 (제목 + 액션 버튼 우측 정렬) ──
+        title_row = QHBoxLayout()
         title = QLabel("가사 / LRC 편집")
         title.setProperty("sectionTitle", True)
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+
+        self.btn_gen = QPushButton("타이밍 생성")
+        self.btn_gen.clicked.connect(lambda: self.gen_clicked.emit())
+        self.btn_gen.setProperty("success", True)
+        self.btn_gen.setFixedWidth(70)
+        title_row.addWidget(self.btn_gen)
+
+        self.btn_cancel = QPushButton("취소")
+        self.btn_cancel.clicked.connect(lambda: self.cancel_clicked.emit())
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setProperty("secondary", True)
+        self.btn_cancel.setFixedWidth(40)
+        title_row.addWidget(self.btn_cancel)
+
+        self.btn_audio_edit = QPushButton("🎧 오디오 편집")
+        self.btn_audio_edit.clicked.connect(lambda: self.audio_edit_clicked.emit())
+        self.btn_audio_edit.setProperty("success", True)
+        self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 80px;")
+        self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
+        title_row.addWidget(self.btn_audio_edit)
+
+        self.btn_denoise = QPushButton("잡음 제거")
+        self.btn_denoise.clicked.connect(lambda: self.denoise_clicked.emit())
+        self.btn_denoise.setProperty("secondary", True)
+        self.btn_denoise.setFixedWidth(60)
+        title_row.addWidget(self.btn_denoise)
+
+        layout.addLayout(title_row)
 
         # ── 좌우 스플리터 ──
         split = QSplitter(Qt.Horizontal)

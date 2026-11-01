@@ -193,20 +193,12 @@ class MainWindow(QWidget):
         self.model_combo = self.settings_section.model_combo
         self.compute_combo = self.settings_section.compute_combo
         self.song_combo = self.settings_section.song_combo
-        self.btn_gen = self.settings_section.btn_gen
-        self.btn_cancel = self.settings_section.btn_cancel
-        self.btn_audio_edit = self.settings_section.btn_audio_edit
-        self.btn_denoise = self.settings_section.btn_denoise
         self.progress = self.settings_section.progress
 
         # SettingsSection 시그널 연결
         self.settings_section.server_toggle_clicked.connect(self._on_server_toggle)
         self.settings_section.health_check_clicked.connect(self.check_health)
         self.settings_section.audio_browse_clicked.connect(self.browse_audio)
-        self.settings_section.generate_clicked.connect(self.generate)
-        self.settings_section.cancel_clicked.connect(self.cancel_generation)
-        self.settings_section.audio_edit_clicked.connect(self.open_audio_editor)
-        self.settings_section.denoise_clicked.connect(self.open_denoise)
         self.settings_section.song_selected.connect(self._on_song_selected)
         self.settings_section.song_refresh_clicked.connect(self._load_ace_songs)
         self.settings_section.settings_changed.connect(self._save_settings)
@@ -230,6 +222,10 @@ class MainWindow(QWidget):
         self.offset_spin = self.lyrics_section.offset_spin
         self.btn_offset = self.lyrics_section.btn_offset
         self._highlighter = LrcHighlighter(self.lyrics_section.preview.document())
+        self.btn_gen = self.lyrics_section.btn_gen
+        self.btn_cancel = self.lyrics_section.btn_cancel
+        self.btn_audio_edit = self.lyrics_section.btn_audio_edit
+        self.btn_denoise = self.lyrics_section.btn_denoise
 
         # LyricsSection 시그널 연결
         self.lyrics_section.apply_clicked.connect(self.apply_to_ace)
@@ -238,6 +234,10 @@ class MainWindow(QWidget):
         self.lyrics_section.auto_offset_clicked.connect(self.apply_auto_offset)
         self.lyrics_section.line_offset_clicked.connect(self.apply_line_offset)
         self.lyrics_section.offset_clicked.connect(self.apply_offset)
+        self.lyrics_section.gen_clicked.connect(self.generate)
+        self.lyrics_section.cancel_clicked.connect(self.cancel_generation)
+        self.lyrics_section.audio_edit_clicked.connect(self.open_audio_editor)
+        self.lyrics_section.denoise_clicked.connect(self.open_denoise)
 
 
         # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
