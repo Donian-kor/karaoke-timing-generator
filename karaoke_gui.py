@@ -422,6 +422,9 @@ class MainWindow(QWidget):
         self.btn_cancel.clicked.connect(self.cancel_generation)
         self.btn_cancel.setEnabled(False)
         row.addWidget(self.btn_cancel)
+        self.btn_audio_edit = QPushButton("오디오 편집")
+        self.btn_audio_edit.clicked.connect(self.open_audio_editor)
+        row.addWidget(self.btn_audio_edit)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
@@ -486,7 +489,7 @@ class MainWindow(QWidget):
         self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
         prow_row2.addWidget(self.btn_auto_offset)
 
-        prow_row2.addWidget(QLabel("줄 시간 맞추기(ms):"))
+        prow_row2.addWidget(QLabel("선택된 줄 맞춤(ms):"))
         self.line_offset_spin = QSpinBox()
         self.line_offset_spin.setRange(-5000, 5000)
         self.line_offset_spin.setSingleStep(10)
@@ -501,13 +504,8 @@ class MainWindow(QWidget):
         self.btn_line_offset.clicked.connect(self.apply_line_offset)
         prow_row2.addWidget(self.btn_line_offset)
 
-        # 오디오 편집 버튼
-        self.btn_audio_edit = QPushButton("오디오 편집")
-        self.btn_audio_edit.clicked.connect(self.open_audio_editor)
-        prow_row2.addWidget(self.btn_audio_edit)
-
         # 타이밍 오프셋 (하단 섹션)
-        prow_row2.addWidget(QLabel("오프셋(ms):"))
+        prow_row2.addWidget(QLabel("전체 줄 맞추기(ms):"))
         self.offset_spin = QSpinBox()
         self.offset_spin.setRange(-5000, 5000)
         self.offset_spin.setSingleStep(10)
