@@ -20,6 +20,7 @@ from core.lrc_parser import (
     lrc_to_plain_text, parse_lrc_words,
 )
 from core.timing_offset import shift_ts, detect_audio_onset, get_first_word_timestamp
+from core.ace_step_integration import load_ace_songs, get_lrc_for_song, apply_lrc_to_ace
 from ui.preview_section import PreviewSection
 from ui.settings_section import SettingsSection
 from ui.lyrics_section import LyricsSection
@@ -235,34 +236,15 @@ class MainWindow(QWidget):
             self.song_combo.blockSignals(False)
             return
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
-            cur = conn.cursor()
-            rows = cur.execute("SELECT id, title FROM songs ORDER BY created_at DESC").fetchall()
-            conn.close()
+            rows = load_ace_songs(db_path)
+            if not rows:
+                self.song_combo.addItem("ACE-Step Studio 미설치", "")
             for sid, title in rows:
                 label = f"{title}  ({sid[:8]}...)"
                 self.song_combo.addItem(label, sid)
         except Exception as e:
             self.song_combo.addItem(f"DB 읽기 실패: {e}", "")
         self.song_combo.blockSignals(False)
-
-    def _ace_lrc_for_song(self, song_id, meta_json):
-        """선택한 곡에 저장된 LRC를 DB(metadata_json.lrc) → .lrc 파일 순서로 찾는다."""
-        lrc = ""
-        try:
-            meta = json.loads(meta_json) if meta_json else {}
-            lrc = (meta.get("lrc") or "").lstrip("\ufeff").strip()
-        except Exception:
-            pass
-        if not lrc:
-            lrc_path = os.path.join(ACE_MEDIA_DIR, f"{song_id}.lrc")
-            if os.path.exists(lrc_path):
-                try:
-                    with open(lrc_path, encoding="utf-8-sig", errors="replace") as f:
-                        lrc = f.read().strip()
-                except Exception:
-                    pass
-        return lrc
 
     def _on_song_selected(self, idx):
         # 곡을 고르면 저장된 원본 가사와 이미 생성된 LRC를 함께 불러온다.
@@ -287,7 +269,7 @@ class MainWindow(QWidget):
 
         lyrics, meta_json = row
         plain = (lyrics or "").strip()
-        lrc = self._ace_lrc_for_song(song_id, meta_json)
+        lrc = get_lrc_for_song(song_id, meta_json, ACE_MEDIA_DIR)
         restored_from_lrc = False
         if not plain and lrc:
             # 원본 가사가 비어 있으면 기존 LRC에서 타임코드만 제거해 복원한다.
@@ -1147,53 +1129,16 @@ class MainWindow(QWidget):
         if reply != QMessageBox.Yes:
             return
         try:
-            # 적용 전 백업 생성
-            if os.path.exists(target):
-                try:
-                    shutil.copy2(target, target + ".bak")
-                except Exception:
-                    pass
             db_path = os.path.join(ACE_DATA_DIR, "library.sqlite")
-            if os.path.exists(db_path):
-                try:
-                    shutil.copy2(db_path, db_path + ".bak")
-                except Exception:
-                    pass
-            with open(target, "w", encoding="utf-8", newline="") as f:
-                f.write(lrc.replace("\n", "\r\n"))
-            # ACE-Step Studio는 metadata_json의 "lrc" 필드를 읽습니다 (파일만으로는 반영 안 됨).
-            db_updated = False
-            lyrics_saved = False
-            if os.path.exists(db_path):
-                try:
-                    conn = sqlite3.connect(db_path, timeout=10)
-                    cur = conn.cursor()
-                    row = cur.execute("SELECT metadata_json FROM songs WHERE id=?", (song_id,)).fetchone()
-                    if row is not None:
-                        import datetime
-                        meta = json.loads(row[0]) if row[0] else {}
-                        meta["lrc"] = lrc
-                        lyrics_text = self.lyrics_edit.toPlainText()
-                        if lyrics_text.strip():
-                            cur.execute(
-                                "UPDATE songs SET metadata_json=?, lyrics=?, updated_at=? WHERE id=?",
-                                (json.dumps(meta, ensure_ascii=False), lyrics_text, datetime.datetime.now().isoformat(), song_id),
-                            )
-                            lyrics_saved = True
-                        else:
-                            cur.execute("UPDATE songs SET metadata_json=? WHERE id=?", (json.dumps(meta, ensure_ascii=False), song_id))
-                        conn.commit()
-                        db_updated = True
-                    conn.close()
-                except Exception:
-                    pass
+            lyrics_text = self.lyrics_edit.toPlainText()
+            result = apply_lrc_to_ace(song_id, lrc, lyrics_text, ACE_MEDIA_DIR, db_path)
             msg = "LRC 파일이 작성되었습니다."
-            if db_updated:
+            if result["db_updated"]:
                 msg += "\nDB(metadata_json.lrc)도 갱신되었습니다."
-                if lyrics_saved:
+                if result["lyrics_saved"]:
                     msg += "\n원본 가사(lyrics)도 함께 저장되었습니다."
             msg += "\nACE-Step Studio를 재시작하면 반영됩니다."
-            self.status_label.setText(f"Ace Step Studio에 적용됨: {target}")
+            self.status_label.setText(f"Ace Step Studio에 적용됨: {result['target']}")
             QMessageBox.information(self, "완료", msg)
         except Exception as e:
             QMessageBox.critical(self, "오류", str(e))
