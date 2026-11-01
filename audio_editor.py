@@ -1037,8 +1037,15 @@ class AudioEditorDialog(QDialog):
         return d1, d2, sr1
 
     def _build_playback_data(self):
-        """현재 트랙 상태(볼륨/M/S 포함)로 재생용 오디오를 만든다."""
-        if self.track1 is not None and self.track2 is not None:
+        """현재 트랙 상태(볼륨/M/S 포함)로 재생용 오디오를 만든다.
+
+        '두 트랙 함께 선택' 체크박스가 체크되어 있으면 두 트랙을 믹싱하고,
+        체크 해제 시 선택된 트랙만 재생한다.
+        """
+        link = getattr(self, "chk_link_selection", None)
+        mix_both = link is not None and link.isChecked()
+
+        if mix_both and self.track1 is not None and self.track2 is not None:
             d1, d2, sr = self._align_pair(self.track1, self.sr1, self.track2, self.sr2)
             solo1 = self.solo1.isChecked()
             solo2 = self.solo2.isChecked()
@@ -1049,6 +1056,17 @@ class AudioEditorDialog(QDialog):
             if peak > 0.99:
                 mixed = mixed * (0.99 / peak)
             return mixed.astype(np.float32), sr
+
+        # 체크 해제 시: 선택된 트랙만 재생
+        which = getattr(self, "_edit_track", 1)
+        if which == 1 and self.track1 is not None:
+            v = 0.0 if self.mute1.isChecked() else self.vol1.value() / 100.0
+            return (self.track1 * v).astype(np.float32), self.sr1
+        if which == 2 and self.track2 is not None:
+            v = 0.0 if self.mute2.isChecked() else self.vol2.value() / 100.0
+            return (self.track2 * v).astype(np.float32), self.sr2
+
+        # fallback: 로드된 트랙 중 하나
         if self.track1 is not None:
             v = 0.0 if self.mute1.isChecked() else self.vol1.value() / 100.0
             return (self.track1 * v).astype(np.float32), self.sr1
