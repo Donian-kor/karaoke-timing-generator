@@ -13,6 +13,7 @@ import numpy as np
 import soundfile as sf
 
 from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
+from core.transcribe_worker import SERVER_URL, TranscribeWorker
 
 
 def _quiet_ffmpeg_noise():
@@ -49,7 +50,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-SERVER_URL = "http://127.0.0.1:8000"
 ACE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ACE-Step Studio", "data")
 ACE_MEDIA_DIR = os.path.join(ACE_DATA_DIR, "media")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -114,42 +114,6 @@ def lrc_to_plain_text(lrc):
         if line:
             lines.append(line)
     return "\n".join(lines)
-
-
-class TranscribeWorker(QThread):
-    progress = Signal(str)
-    finished = Signal(dict)
-    failed = Signal(str)
-
-    def __init__(self, audio_path, language, lyrics=""):
-        super().__init__()
-        self.audio_path = audio_path
-        self.language = language
-        self.lyrics = lyrics
-
-    def run(self):
-        try:
-            self._run_inner()
-        except Exception as e:
-            self.finished.emit(False, f"서버 시작 중 예외: {e}")
-
-    def _run_inner(self):
-        try:
-            self.progress.emit("서버에 오디오 전송 중...")
-            with open(self.audio_path, "rb") as f:
-                files = {"file": (os.path.basename(self.audio_path), f)}
-                data = {"language": self.language, "response_format": "verbose_json", "lyrics": self.lyrics}
-                resp = requests.post(f"{SERVER_URL}/v1/audio/transcriptions", files=files, data=data, timeout=600)
-            if resp.status_code != 200:
-                self.failed.emit(f"서버 오류 {resp.status_code}: {resp.text}")
-                return
-            result = resp.json()
-            if "error" in result:
-                self.failed.emit(f"전사 실패: {result['error']}")
-                return
-            self.finished.emit(result)
-        except Exception as e:
-            self.failed.emit(str(e))
 
 
 class LrcHighlighter(QSyntaxHighlighter):
