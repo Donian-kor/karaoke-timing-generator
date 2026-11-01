@@ -14,6 +14,7 @@ import soundfile as sf
 
 from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
 from core.transcribe_worker import SERVER_URL, TranscribeWorker
+from ui.preview_section import PreviewSection
 
 
 def _quiet_ffmpeg_noise():
@@ -516,74 +517,14 @@ class MainWindow(QWidget):
         btn_row.addStretch(1)
         lyrics_layout.addLayout(btn_row)
 
-        # ── 재생 미리보기 섹션 ─────────────────────
-        preview_frame = QFrame()
-        preview_frame.setObjectName("previewSection")
-        preview_frame.setProperty("section", True)
-        preview_layout = QVBoxLayout(preview_frame)
-        preview_layout.setContentsMargins(16, 16, 16, 16)
-        preview_layout.setSpacing(12)
+        # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
+        self.preview_section = PreviewSection()
 
-        preview_title = QLabel("재생 미리보기")
-        preview_title.setProperty("sectionTitle", True)
-        preview_layout.addWidget(preview_title)
-
-        self.preview_lyric_label = QLabel("")
-        self.preview_lyric_label.setAlignment(Qt.AlignCenter)
-        self.preview_lyric_label.setFocusPolicy(Qt.ClickFocus)
-        self.preview_lyric_label.setWordWrap(True)
-        self.preview_lyric_label.setTextFormat(Qt.RichText)
-        self.preview_lyric_label.setMinimumHeight(100)
-        self.preview_lyric_label.setStyleSheet(
-            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 20px; font-weight: 700; color: #1E293B; "
-            "background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 1px solid #E2E8F0;"
-        )
-        preview_layout.addWidget(self.preview_lyric_label, 1)
-
-        self.preview_time_label = QLabel("0:00.00 / 0:00.00")
-        self.preview_time_label.setAlignment(Qt.AlignCenter)
-        self.preview_time_label.setProperty("textColor", "secondary")
-        self.preview_time_label.setStyleSheet("font-size: 16px; font-weight: 700;")
-        preview_layout.addWidget(self.preview_time_label)
-
-        # 재생 슬라이드바 (seek)
-        self.preview_slider = QSlider(Qt.Horizontal)
-        self.preview_slider.setRange(0, 0)
-        self.preview_slider.sliderMoved.connect(self._on_slider_moved)
-        preview_layout.addWidget(self.preview_slider)
-
-        # ── 재생/맞춤 컨트롤 (2줄 레이아웃: 가로 길이 줄임) ──
-        prow_row1 = QHBoxLayout()
-        self.btn_play_toggle = QPushButton("재생")
-        self.btn_play_toggle.clicked.connect(self._on_play_toggle)
-        self.btn_play_toggle.setProperty("success", True)
-        prow_row1.addWidget(self.btn_play_toggle)
-        self.btn_stop = QPushButton("정지")
-        self.btn_stop.clicked.connect(self.preview_stop)
-        self.btn_stop.setProperty("secondary", True)
-        prow_row1.addWidget(self.btn_stop)
-        # 재생 속도
-        prow_row1.addWidget(QLabel("속도:"))
-        self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x"])
-        self.speed_combo.setCurrentText("1.0x")
-        self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
-        prow_row1.addWidget(self.speed_combo)
-        prow_row1.addStretch(1)
-        prow_row1.addWidget(QLabel("색상:"))
-        self.color_combo = QComboBox()
-        self.color_combo.addItems(["현재", "지난", "다가올"])
-        self.color_combo.setCurrentText("현재")
-        self.color_combo.setFixedWidth(70)
-        self.color_combo.currentTextChanged.connect(self._on_color_changed)
-        prow_row1.addWidget(self.color_combo)
-
-        preview_layout.addLayout(prow_row1)
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
         vsplitter = QSplitter(Qt.Vertical)
         vsplitter.addWidget(top_widget)
-        vsplitter.addWidget(preview_frame)
+        vsplitter.addWidget(self.preview_section)
         vsplitter.addWidget(lyrics_frame)
         vsplitter.setSizes([180, 250, 320])
         vsplitter.setStretchFactor(0, 0)
@@ -1186,15 +1127,15 @@ class MainWindow(QWidget):
         def fmt(t):
             m = int(t // 60); s = t % 60
             return f"{m}:{s:05.2f}"
-        self.preview_time_label.setText(f"현재 {fmt(pos)}  /  전체 {fmt(total)}")
+        self.preview_section.preview_time_label.setText(f"현재 {fmt(pos)}  /  전체 {fmt(total)}")
         # 슬라이더 동기화
         total_ms = int(total * 1000)
-        if total_ms > 0 and self.preview_slider.maximum() != total_ms:
-            self.preview_slider.setRange(0, total_ms)
-        if not self.preview_slider.isSliderDown():
-            self.preview_slider.blockSignals(True)
-            self.preview_slider.setValue(int(pos * 1000))
-            self.preview_slider.blockSignals(False)
+        if total_ms > 0 and self.preview_section.preview_slider.maximum() != total_ms:
+            self.preview_section.preview_slider.setRange(0, total_ms)
+        if not self.preview_section.preview_slider.isSliderDown():
+            self.preview_section.preview_slider.blockSignals(True)
+            self.preview_section.preview_slider.setValue(int(pos * 1000))
+            self.preview_section.preview_slider.blockSignals(False)
         if not self._preview_parsed:
             return
         idx = -1
@@ -1204,7 +1145,7 @@ class MainWindow(QWidget):
             else:
                 break
         if idx < 0 or pos < self._preview_parsed[0][0]:
-            self.preview_lyric_label.setText("")
+            self.preview_section.preview_lyric_label.setText("")
             self._clear_preview_highlight()
         else:
             self._highlight_preview_line(idx)
@@ -1217,7 +1158,7 @@ class MainWindow(QWidget):
                     parts.append(f'<span style="color:{self._color_state["past"]};">{wtext}</span>')
                 else:
                     parts.append(f'<span style="color:{self._color_state["future"]};">{wtext}</span>')
-            self.preview_lyric_label.setText(" ".join(parts))
+            self.preview_section.preview_lyric_label.setText(" ".join(parts))
         pass
 
     def _highlight_preview_line(self, line_index):
@@ -1267,9 +1208,9 @@ class MainWindow(QWidget):
     def _update_play_btn(self):
         """재생 상태에 따라 토글 버튼 텍스트와 스타일을 업데이트한다."""
         if self._player is not None and self._player.playbackState() == QMediaPlayer.PlayingState:
-            self.btn_play_toggle.setText("일시정지")
+            self.preview_section.btn_play_toggle.setText("일시정지")
         else:
-            self.btn_play_toggle.setText("재생")
+            self.preview_section.btn_play_toggle.setText("재생")
 
     def _on_color_changed(self, text):
         """색상 콤보박스 변경 시 해당 위치 색상을 수정한다."""
@@ -1309,8 +1250,8 @@ class MainWindow(QWidget):
             self._player.stop()
         if self._preview_timer is not None:
             self._preview_timer.stop()
-        self.preview_lyric_label.setText("")
-        self.preview_time_label.setText("0:00.00 / 0:00.00")
+        self.preview_section.preview_lyric_label.setText("")
+        self.preview_section.preview_time_label.setText("0:00.00 / 0:00.00")
         self._clear_preview_highlight()
         self._update_play_btn()
 
