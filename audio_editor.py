@@ -392,6 +392,7 @@ class AudioEditorDialog(QDialog):
         self._sel_track = 1       # 현재 드래그 중인 트랙
         self._clipboard = None    # 구간 복사/붙여넣기 클립보드
         self._loop_mode = False   # 선택 구간 반복 재생 모드
+        self._loop_start = 0.0    # 반복 재생 구간 시작 위치 (원본 좌표)
 
         self.setStyleSheet(_build_design_qss())
         self._build_ui()
@@ -1121,10 +1122,12 @@ class AudioEditorDialog(QDialog):
             self.play_slider.blockSignals(False)
         # 플레이헤드 갱신
         t = pos_ms / 1000.0
+        if getattr(self, "_loop_mode", False):
+            t = getattr(self, "_loop_start", 0.0) + t
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(t)
         # 시간 라벨
-        self.time_label.setText(f"{t:.2f} / {self._play_total_sec:.2f}")
+        self.time_label.setText(f"{pos_ms / 1000.0:.2f} / {self._play_total_sec:.2f}")
 
     def _on_media_status(self, status):
         from PySide6.QtMultimedia import QMediaPlayer
@@ -1472,8 +1475,12 @@ class AudioEditorDialog(QDialog):
             self._player.positionChanged.connect(self._on_position_changed)
             self._player.mediaStatusChanged.connect(self._on_media_status)
         self._loop_mode = True
+        self._loop_start = s
         self._play_total_sec = len(segment) / sr
         self._player.setSource(QUrl.fromLocalFile(tmp))
+        # 재생 시작 전 플레이헤드를 구간 시작 위치로 설정
+        for ph in (self.playhead1, self.playhead2, self.playhead3):
+            ph.setPos(s)
         self._player.play()
         self.status.setText(f"선택 구간 반복 재생 중... ({s:.3f}~{e:.3f}초)")
 
