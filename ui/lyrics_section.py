@@ -52,14 +52,14 @@ class LyricsSection(QFrame):
         self.btn_gen = QPushButton("타이밍 생성")
         self.btn_gen.clicked.connect(lambda: self.gen_clicked.emit())
         self.btn_gen.setProperty("success", True)
-        self.btn_gen.setFixedWidth(70)
+        self.btn_gen.setFixedWidth(152)
         title_row.addWidget(self.btn_gen)
 
         self.btn_cancel = QPushButton("취소")
         self.btn_cancel.clicked.connect(lambda: self.cancel_clicked.emit())
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setProperty("secondary", True)
-        self.btn_cancel.setFixedWidth(40)
+        self.btn_cancel.setFixedWidth(152)
         title_row.addWidget(self.btn_cancel)
 
         self.btn_audio_edit = QPushButton("🎧 오디오 편집")
@@ -67,12 +67,13 @@ class LyricsSection(QFrame):
         self.btn_audio_edit.setProperty("success", True)
         self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 80px;")
         self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
+        self.btn_audio_edit.setFixedWidth(152)
         title_row.addWidget(self.btn_audio_edit)
 
         self.btn_denoise = QPushButton("잡음 제거")
         self.btn_denoise.clicked.connect(lambda: self.denoise_clicked.emit())
         self.btn_denoise.setProperty("secondary", True)
-        self.btn_denoise.setFixedWidth(60)
+        self.btn_denoise.setFixedWidth(152)
         title_row.addWidget(self.btn_denoise)
 
         layout.addLayout(title_row)
