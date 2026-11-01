@@ -223,7 +223,6 @@ class MainWindow(QWidget):
         self.btn_offset = self.lyrics_section.btn_offset
         self._highlighter = LrcHighlighter(self.lyrics_section.preview.document())
         self.btn_gen = self.lyrics_section.btn_gen
-        self.btn_cancel = self.lyrics_section.btn_cancel
         self.btn_audio_edit = self.lyrics_section.btn_audio_edit
         self.btn_denoise = self.lyrics_section.btn_denoise
 
@@ -234,8 +233,7 @@ class MainWindow(QWidget):
         self.lyrics_section.auto_offset_clicked.connect(self.apply_auto_offset)
         self.lyrics_section.line_offset_clicked.connect(self.apply_line_offset)
         self.lyrics_section.offset_clicked.connect(self.apply_offset)
-        self.lyrics_section.gen_clicked.connect(self.generate)
-        self.lyrics_section.cancel_clicked.connect(self.cancel_generation)
+        self.lyrics_section.gen_clicked.connect(self.on_gen_toggle)
         self.lyrics_section.audio_edit_clicked.connect(self.open_audio_editor)
         self.lyrics_section.denoise_clicked.connect(self.open_denoise)
 
@@ -563,7 +561,7 @@ class MainWindow(QWidget):
         if info is None:
             # 서버가 꺼져 있으면 자동으로 시작하고, 준비된 뒤 생성을 이어간다.
             self._pending_generate = True
-            self.btn_gen.setEnabled(False)  # 서버 시작 중에는 중복 실행 방지
+            self.lyrics_section.set_generating(True)  # 서버 시작 중에는 중복 실행 방지
             self.status_label.setText("서버가 실행 중이 아닙니다. 서버를 시작하는 중입니다...")
             self.start_server()
             return
@@ -584,8 +582,7 @@ class MainWindow(QWidget):
             return
 
         self.progress.setVisible(True)
-        self.btn_gen.setEnabled(False)
-        self.btn_cancel.setEnabled(True)
+        self.lyrics_section.set_generating(True)
         self.status_label.setText("타이밍 생성 중...")
         self.preview.clear()
 
@@ -594,6 +591,13 @@ class MainWindow(QWidget):
         self.worker.finished.connect(self.on_finished)
         self.worker.failed.connect(self.on_failed)
         self.worker.start()
+
+    def on_gen_toggle(self):
+        """생성/취소 토글 버튼 클릭 시 호출된다."""
+        if self.worker is not None and self.worker.isRunning():
+            self.cancel_generation()
+        else:
+            self.generate()
 
     def cancel_generation(self):
         if self.worker is not None and self.worker.isRunning():
@@ -607,14 +611,12 @@ class MainWindow(QWidget):
                     pass
             self.worker = None
         self.progress.setVisible(False)
-        self.btn_gen.setEnabled(True)
-        self.btn_cancel.setEnabled(False)
+        self.lyrics_section.set_generating(False)
         self.status_label.setText("생성 취소됨")
 
     def on_finished(self, result):
         self.progress.setVisible(False)
-        self.btn_gen.setEnabled(True)
-        self.btn_cancel.setEnabled(False)
+        self.lyrics_section.set_generating(False)
         self.result = result
         std = build_standard_lrc(result.get("segments", []))
         enh = build_enhanced_lrc(result.get("segments", []))
@@ -628,8 +630,7 @@ class MainWindow(QWidget):
 
     def on_failed(self, msg):
         self.progress.setVisible(False)
-        self.btn_gen.setEnabled(True)
-        self.btn_cancel.setEnabled(False)
+        self.lyrics_section.set_generating(False)
         self.status_label.setText("생성 실패")
         QMessageBox.critical(self, "오류", msg)
 

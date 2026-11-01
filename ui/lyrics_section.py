@@ -27,7 +27,6 @@ class LyricsSection(QFrame):
     line_offset_clicked = Signal()
     offset_clicked = Signal()
     gen_clicked = Signal()
-    cancel_clicked = Signal()
     audio_edit_clicked = Signal()
     denoise_clicked = Signal()
 
@@ -54,13 +53,6 @@ class LyricsSection(QFrame):
         self.btn_gen.setProperty("success", True)
         self.btn_gen.setFixedWidth(152)
         title_row.addWidget(self.btn_gen)
-
-        self.btn_cancel = QPushButton("취소")
-        self.btn_cancel.clicked.connect(lambda: self.cancel_clicked.emit())
-        self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setProperty("secondary", True)
-        self.btn_cancel.setFixedWidth(152)
-        title_row.addWidget(self.btn_cancel)
 
         self.btn_audio_edit = QPushButton("🎧 오디오 편집")
         self.btn_audio_edit.clicked.connect(lambda: self.audio_edit_clicked.emit())
@@ -167,3 +159,20 @@ class LyricsSection(QFrame):
 
         btn_row.addStretch(1)
         layout.addLayout(btn_row)
+
+    def set_generating(self, generating: bool) -> None:
+        """생성 중 상태에 따라 버튼 텍스트와 색상을 토글한다."""
+        if generating:
+            self.btn_gen.setText("취소")
+            self.btn_gen.setProperty("success", False)
+            self.btn_gen.setProperty("danger", True)
+            self.btn_gen.setStyleSheet("")
+            self.btn_gen.style().unpolish(self.btn_gen)
+            self.btn_gen.style().polish(self.btn_gen)
+        else:
+            self.btn_gen.setText("타이밍 생성")
+            self.btn_gen.setProperty("danger", False)
+            self.btn_gen.setProperty("success", True)
+            self.btn_gen.setStyleSheet("")
+            self.btn_gen.style().unpolish(self.btn_gen)
+            self.btn_gen.style().polish(self.btn_gen)
