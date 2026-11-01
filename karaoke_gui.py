@@ -25,6 +25,7 @@ from ui.preview_section import PreviewSection
 from ui.settings_section import SettingsSection
 from ui.lyrics_section import LyricsSection
 from ui.lrc_highlighter import LrcHighlighter
+from ui.help_dialog import HelpDialog
 
 
 def _quiet_ffmpeg_noise():
@@ -56,7 +57,7 @@ from PySide6.QtCore import QThread, Signal, Qt, QTimer, QUrl, QEvent, QRegularEx
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QMessageBox,
-    QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame,
+    QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame, QMenuBar,
 )
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -161,6 +162,25 @@ class MainWindow(QWidget):
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ── 메뉴바 ──
+        menubar = QMenuBar(self)
+        help_menu = menubar.addMenu("도움말(&H)")
+        act_help = help_menu.addAction("사용 방법")
+        act_help.setShortcut("F1")
+        act_help.triggered.connect(self._show_help)
+        menubar.setStyleSheet(
+            "QMenuBar { background: #F8FAFC; border-bottom: 1px solid #E2E8F0; padding: 2px; }"
+            "QMenuBar::item { padding: 4px 12px; border-radius: 4px; }"
+            "QMenuBar::item:selected { background: #E2E8F0; }"
+        )
+        main_layout.addWidget(menubar)
+
+        main_layout.setContentsMargins(12, 8, 12, 12)
+        main_layout.setSpacing(8)
+
         # 설정 섹션 (SettingsSection 위젯)
         self.settings_section = SettingsSection()
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
@@ -1100,6 +1120,10 @@ class MainWindow(QWidget):
             QMessageBox.information(self, "완료", msg)
         except Exception as e:
             QMessageBox.critical(self, "오류", str(e))
+
+    def _show_help(self):
+        """도움말 다이얼로그를 표시한다."""
+        HelpDialog(self).exec()
 
     def closeEvent(self, event):
         self._save_settings()
