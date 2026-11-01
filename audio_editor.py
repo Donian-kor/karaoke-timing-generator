@@ -459,6 +459,9 @@ class AudioEditorDialog(QDialog):
 
         # 도움말 메뉴
         help_menu = menubar.addMenu("도움말(H)")
+        act_help = help_menu.addAction("사용 방법")
+        act_help.setShortcut("F1")
+        act_help.triggered.connect(self._show_help)
         act_about = help_menu.addAction("정보(A)")
         act_about.triggered.connect(self._show_about)
 
@@ -778,6 +781,11 @@ class AudioEditorDialog(QDialog):
         height.setToolTip("트랙 높이 조절")
         v.addWidget(height)
         return frame, vol, mute, solo, info, height
+
+    def _show_help(self):
+        """도움말 다이얼로그를 표시한다."""
+        from ui.help_dialog import HelpDialog
+        HelpDialog(self).exec()
 
     def _show_about(self):
         """프로그램 정보 다이얼로그를 표시한다."""

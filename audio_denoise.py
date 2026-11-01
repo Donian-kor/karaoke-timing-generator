@@ -1197,6 +1197,11 @@ class DenoiseDialog(QDialog):
         self.btn_license.setProperty("secondary", True)
         self.btn_license.clicked.connect(self._show_licenses)
         action_row.addWidget(self.btn_license)
+
+        self.btn_help = QPushButton("도움말")
+        self.btn_help.setProperty("secondary", True)
+        self.btn_help.clicked.connect(self._show_help)
+        action_row.addWidget(self.btn_help)
         action_row.addStretch(1)
         self.btn_start = QPushButton("잡음 제거 시작")
         self.btn_start.setProperty("success", True)
@@ -1395,6 +1400,10 @@ class DenoiseDialog(QDialog):
 
     def _show_licenses(self) -> None:
         LicenseDialog(self).exec()
+
+    def _show_help(self) -> None:
+        from ui.help_dialog import HelpDialog
+        HelpDialog(self).exec()
 
     # ---------- 작업 시작/취소 ----------
     def _start(self) -> None:
