@@ -18,8 +18,30 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
+from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
+
 import pyqtgraph as pg
 
+# pyqtgraph 우클릭 메뉴(영어)를 한국어로 표시하기 위한 번역 사전
+_PG_TRANSLATIONS = {
+    "ViewBox options": "보기 옵션",
+    "View All": "전체 보기",
+    "axis": "축",
+    "Mouse Mode": "마우스 모드",
+    "3 button": "3버튼 (이동)",
+    "1 button": "1버튼 (확대/축소)",
+    "Link Axis:": "축 연결:",
+    "Auto": "자동",
+    "Manual": "수동",
+    "Invert Axis": "축 뒤집기",
+    "Mouse Enabled": "마우스 조작 사용",
+    "Visible Data Only": "보이는 데이터만",
+    "Auto Pan Only": "자동 이동만",
+    "%": "%",
+    "0": "0",
+}
+
+# ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
 # pyqtgraph 우클릭 메뉴(영어)를 한국어로 표시하기 위한 번역 사전
 _PG_TRANSLATIONS = {
     "ViewBox options": "보기 옵션",
