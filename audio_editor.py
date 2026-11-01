@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
-    QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox,
+    QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox, QMenuBar,
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
@@ -372,6 +372,60 @@ class AudioEditorDialog(QDialog):
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # ── 메뉴바 (상단) ──
+        menubar = QMenuBar(self)
+        layout.addWidget(menubar)
+
+        # 파일 메뉴
+        file_menu = menubar.addMenu("파일(F)")
+        act_open1 = file_menu.addAction("반주 열기(O)")
+        act_open1.triggered.connect(lambda: self.open_track(1))
+        act_open2 = file_menu.addAction("보컬 열기(O)")
+        act_open2.triggered.connect(lambda: self.open_track(2))
+        file_menu.addSeparator()
+        act_save1 = file_menu.addAction("1번 트랙 저장(S)")
+        act_save1.triggered.connect(lambda: self.save_track(1))
+        act_save2 = file_menu.addAction("2번 트랙 저장(S)")
+        act_save2.triggered.connect(lambda: self.save_track(2))
+        act_save_both = file_menu.addAction("두 트랙 따로 저장(B)")
+        act_save_both.triggered.connect(self.save_both_tracks)
+        file_menu.addSeparator()
+        act_exit = file_menu.addAction("종료(X)")
+        act_exit.triggered.connect(self.close)
+
+        # 편집 메뉴
+        edit_menu = menubar.addMenu("편집(E)")
+        act_copy = edit_menu.addAction("복사(C)")
+        act_copy.setShortcut("Ctrl+C")
+        act_copy.triggered.connect(self.copy_selection)
+        act_paste = edit_menu.addAction("붙여넣기(V)")
+        act_paste.setShortcut("Ctrl+V")
+        act_paste.triggered.connect(self.paste_clipboard)
+        act_cut = edit_menu.addAction("잘라내기(T)")
+        act_cut.setShortcut("Ctrl+T")
+        act_cut.triggered.connect(self.trim_delete)
+        act_mute = edit_menu.addAction("음소거(M)")
+        act_mute.setShortcut("Ctrl+M")
+        act_mute.triggered.connect(self.delete_selection_silence)
+        act_undo = edit_menu.addAction("되돌리기(Z)")
+        act_undo.setShortcut("Ctrl+Z")
+        act_undo.triggered.connect(self.undo)
+
+        # 보기 메뉴
+        view_menu = menubar.addMenu("보기(V)")
+        act_link = view_menu.addAction("두 트랙 함께 선택(L)")
+        act_link.setCheckable(True)
+        act_link.setChecked(self.chk_link_selection.isChecked())
+        act_link.triggered.connect(
+            lambda checked: self.chk_link_selection.setChecked(checked)
+        )
+
+        # 도움말 메뉴
+        help_menu = menubar.addMenu("도움말(H)")
+        act_about = help_menu.addAction("정보(A)")
+        act_about.triggered.connect(self._show_about)
 
         # 상단 툴바
         toolbar = QHBoxLayout()
@@ -709,6 +763,15 @@ class AudioEditorDialog(QDialog):
         height.setToolTip("트랙 높이 조절")
         v.addWidget(height)
         return frame, vol, mute, solo, info, height
+
+    def _show_about(self):
+        """프로그램 정보 다이얼로그를 표시한다."""
+        QMessageBox.about(
+            self, "오디오 편집기 정보",
+            "로컬 노래방 타이밍 생성기 - 오디오 편집기\n\n"
+            "멀티트랙 파형 편집, 구간 자르기, 잡음 제거, 믹싱을 처리합니다.\n"
+            "Audacity 스타일 멀티트랙 편집을 Python으로 구현했습니다."
+        )
 
     # ---------- 내부 헬퍼 ----------
     def _region_for_track(self, track):
