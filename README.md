@@ -222,6 +222,10 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 |---|---|
 | Del / Backspace | 선택 구간 음소거 (길이 유지) |
 | Ctrl+Z | 되돌리기 |
+| Ctrl+C | 선택 구간 복사 |
+| Ctrl+X | 선택 구간 잘라내기 (클립보드에 복사) |
+| Ctrl+V | 클립보드 붙여넣기 |
+| Ctrl+마우스휠 | 파형 가로축 확대/축소 |
 
 ---
 
@@ -276,16 +280,32 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 
 ```
 karaoke-timing-generator/
-├── karaoke_gui.py      # PySide6 GUI (메인)
-├── audio_editor.py     # 멀티트랙 오디오 편집기
-├── audio_denoise.py    # 파일 스트리밍 잡음 제거 (afftdn / DeepFilterNet)
-├── stt_server.py       # FastAPI STT 서버 (faster-whisper)
-├── run_karaoke.bat     # GUI 실행
-├── run_server.bat      # 서버 실행
-├── settings.json       # 사용자 설정 (자동 생성, 커밋되지 않음)
-├── THIRD_PARTY_LICENSES.md  # 서드파티 구성요소 라이선스 고지 (배포 시 함께 제공)
-├── .gitignore          # Git 무시 파일
-└── README.md           # 이 파일
+├── karaoke_gui.py          # PySide6 GUI (메인) - 조립/오케스트레이션
+├── audio_editor.py         # 멀티트랙 오디오 편집기
+├── audio_denoise.py        # 파일 스트리밍 잡음 제거 (afftdn / DeepFilterNet)
+├── stt_server.py           # FastAPI STT 서버 (faster-whisper)
+├── core/                   # 비즈니스 로직 모듈
+│   ├── __init__.py
+│   ├── transcribe_worker.py  # STT 전사 워커
+│   ├── lrc_parser.py         # LRC 파싱/빌딩 유틸리티
+│   ├── server_worker.py      # 서버 시작/상태 확인 워커
+│   ├── timing_offset.py      # 타이밍 오프셋 조정 유틸리티
+│   └── ace_step_integration.py  # ACE-Step Studio DB 연동
+├── ui/                     # UI 위젯 모듈
+│   ├── __init__.py
+│   ├── design_tokens.py      # 디자인 토큰 + QSS 스타일시트
+│   ├── preview_section.py    # 재생 미리보기 섹션 위젯
+│   ├── settings_section.py   # 서버/설정 섹션 위젯
+│   ├── lyrics_section.py     # 가사/LRC 편집 섹션 위젯
+│   └── lrc_highlighter.py   # LRC 구문 강조기
+├── fonts/
+│   └── Inter-Regular.ttf     # Inter 폰트
+├── run_karaoke.bat         # GUI 실행
+├── run_server.bat          # 서버 실행
+├── settings.json           # 사용자 설정 (자동 생성, 커밋되지 않음)
+├── THIRD_PARTY_LICENSES.md # 서드파티 구성요소 라이선스 고지 (배포 시 함께 제공)
+├── .gitignore              # Git 무시 파일
+└── README.md               # 이 파일
 ```
 
 ---
@@ -302,7 +322,6 @@ karaoke-timing-generator/
 | 리샘플링 | SciPy | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
 | 오디오 입출력 | soundfile | BSD-3-Clause License | 가능 | Python 바인딩은 BSD-3-Clause이며, 휠에 포함된 libsndfile은 LGPL v2.1입니다. |
 | 오디오 코덱 (하부) | libsndfile | GNU LGPL v2.1 | 가능 | soundfile 휠에 포함될 수 있습니다. 수정 시 LGPL 조건 적용. |
-| 잡음 제거 | noisereduce | MIT License | 가능 | 저작권 표시 유지. |
 | 잡음 제거 (파일) | FFmpeg (`afftdn`) | LGPL v2.1+ (LGPL 빌드) / GPL v3 (GPL 빌드) | 빌드에 따름 | **상업 배포에는 `--enable-gpl`·`--enable-nonfree`가 없는 LGPL 빌드를 사용해야 합니다.** 이 프로그램은 FFmpeg를 별도 프로세스로 호출하며 링크하지 않습니다. |
 | 잡음 제거 (음성, 선택) | DeepFilterNet | MIT / Apache 2.0 (듀얼) | 가능 | 선택 설치. 공식 저장소의 모델 가중치도 동일한 듀얼 라이선스로 안내됩니다. 외부 변환 모델은 별도 확인. |
 | STT 모델 | faster-whisper / stable-whisper | MIT License | 가능 | 다운로드하는 Whisper 모델 가중치는 OpenAI 등 별도 라이선스 적용 가능. 재배포 전 확인 필요. |
