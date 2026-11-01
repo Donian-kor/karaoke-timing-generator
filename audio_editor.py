@@ -249,9 +249,10 @@ class _NoiseWorker(QThread):
     def run(self):
         try:
             import noisereduce as nr
-            # noisereduce는 1차원(모노) 데이터에서 가장 안정적으로 작동한다.
-            # 스테레오 데이터는 메모리를 2배 사용하므로 자동 잡음 제거 시 모노로 변환한다.
-            y = _to_mono(self.data).astype(np.float32)
+            # 스테레오(2채널) 상태를 그대로 유지한다.
+            # noisereduce는 2차원 배열(샘플, 채널)을 지원하며,
+            # 좌우 채널을 각각 독립적으로 잡음 제거한다.
+            y = self.data.astype(np.float32)
             if self.noise_clip is not None:
                 noise = self.noise_clip.astype(np.float32)
                 reduced = nr.reduce_noise(y=y, sr=self.sr, y_noise=noise)
