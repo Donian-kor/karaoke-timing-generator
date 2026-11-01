@@ -451,14 +451,10 @@ class MainWindow(QWidget):
         self.server_status.setProperty("textColor", "secondary")
         row.addWidget(self.server_status)
         row.addStretch(1)
-        self.btn_server = QPushButton("서버 시작")
-        self.btn_server.clicked.connect(self.start_server)
-        self.btn_server.setProperty("success", True)
-        row.addWidget(self.btn_server)
-        self.btn_stop_server = QPushButton("서버 중지")
-        self.btn_stop_server.clicked.connect(self.stop_server)
-        self.btn_stop_server.setProperty("danger", True)
-        row.addWidget(self.btn_stop_server)
+        self.btn_server_toggle = QPushButton("서버 시작")
+        self.btn_server_toggle.clicked.connect(self._on_server_toggle)
+        self.btn_server_toggle.setProperty("success", True)
+        row.addWidget(self.btn_server_toggle)
         self.btn_health = QPushButton("상태 확인")
         self.btn_health.clicked.connect(self.check_health)
         self.btn_health.setProperty("secondary", True)
@@ -667,14 +663,10 @@ class MainWindow(QWidget):
 
         # ── 재생/맞춤 컨트롤 (2줄 레이아웃: 가로 길이 줄임) ──
         prow_row1 = QHBoxLayout()
-        self.btn_play = QPushButton("재생")
-        self.btn_play.clicked.connect(self.preview_play)
-        self.btn_play.setProperty("success", True)
-        prow_row1.addWidget(self.btn_play)
-        self.btn_pause = QPushButton("일시정지")
-        self.btn_pause.clicked.connect(self.preview_pause)
-        self.btn_pause.setProperty("secondary", True)
-        prow_row1.addWidget(self.btn_pause)
+        self.btn_play_toggle = QPushButton("재생")
+        self.btn_play_toggle.clicked.connect(self._on_play_toggle)
+        self.btn_play_toggle.setProperty("success", True)
+        prow_row1.addWidget(self.btn_play_toggle)
         self.btn_stop = QPushButton("정지")
         self.btn_stop.clicked.connect(self.preview_stop)
         self.btn_stop.setProperty("secondary", True)
@@ -688,24 +680,12 @@ class MainWindow(QWidget):
         prow_row1.addWidget(self.speed_combo)
         prow_row1.addStretch(1)
         prow_row1.addWidget(QLabel("색상:"))
-        def make_color_btn(key, label):
-            btn = QPushButton(label)
-            btn.setFixedWidth(70)
-            btn.setProperty("secondary", True)
-            def update_style():
-                btn.setStyleSheet(f"background:{self._color_state[key]}; color:#000; font-weight:600; border:1px solid #E2E8F0; border-radius: 4px;")
-            update_style()
-            def on_click():
-                c = QColorDialog.getColor(QColor(self._color_state[key]), self, f"{label} 색상")
-                if c.isValid():
-                    self._color_state[key] = c.name()
-                    update_style()
-                    self._save_settings()
-            btn.clicked.connect(on_click)
-            return btn
-        prow_row1.addWidget(make_color_btn("current", "현재"))
-        prow_row1.addWidget(make_color_btn("past", "지난"))
-        prow_row1.addWidget(make_color_btn("future", "다가올"))
+        self.color_combo = QComboBox()
+        self.color_combo.addItems(["현재", "지난", "다가올"])
+        self.color_combo.setCurrentText("현재")
+        self.color_combo.setFixedWidth(70)
+        self.color_combo.currentTextChanged.connect(self._on_color_changed)
+        prow_row1.addWidget(self.color_combo)
 
         preview_layout.addLayout(prow_row1)
 
@@ -841,6 +821,28 @@ class MainWindow(QWidget):
         if path:
             self.audio_edit.setText(path)
 
+    def _on_server_toggle(self):
+        """서버 시작/중지 토글."""
+        if self.server_proc is not None and self.server_proc.poll() is None:
+            self.stop_server()
+        else:
+            self.start_server()
+        self._update_server_btn()
+
+    def _update_server_btn(self):
+        """서버 상태에 따라 토글 버튼 텍스트와 스타일을 업데이트한다."""
+        running = self.server_proc is not None and self.server_proc.poll() is None
+        if running:
+            self.btn_server_toggle.setText("서버 중지")
+            self.btn_server_toggle.setProperty("danger", True)
+            self.btn_server_toggle.setProperty("success", False)
+        else:
+            self.btn_server_toggle.setText("서버 시작")
+            self.btn_server_toggle.setProperty("success", True)
+            self.btn_server_toggle.setProperty("danger", False)
+        self.btn_server_toggle.style().unpolish(self.btn_server_toggle)
+        self.btn_server_toggle.style().polish(self.btn_server_toggle)
+
     def start_server(self):
         if self.server_proc is not None and self.server_proc.poll() is None:
             # 모델 변경 반영을 위해 기존 서버 종료 후 재시작
@@ -916,6 +918,7 @@ class MainWindow(QWidget):
             if msg:
                 self.status_label.setText(msg)
                 QMessageBox.warning(self, "서버", msg)
+        self._update_server_btn()
 
     def stop_server(self):
         self._pending_generate = False
@@ -958,6 +961,7 @@ class MainWindow(QWidget):
             pass
         self.server_status.setText("서버 상태: 중지됨")
         self.status_label.setText("서버가 중지되었습니다.")
+        self._update_server_btn()
 
     def check_health(self):
         try:
@@ -1344,6 +1348,34 @@ class MainWindow(QWidget):
             cursor.mergeCharFormat(QTextCharFormat())
             self._last_highlight_block = None
 
+    def _on_play_toggle(self):
+        """재생/일시정지 토글."""
+        if self._player is None:
+            self.preview_play()
+        elif self._player.playbackState() == QMediaPlayer.PlayingState:
+            self.preview_pause()
+        else:
+            self._player.play()
+            if self._preview_timer is not None:
+                self._preview_timer.start()
+        self._update_play_btn()
+
+    def _update_play_btn(self):
+        """재생 상태에 따라 토글 버튼 텍스트와 스타일을 업데이트한다."""
+        if self._player is not None and self._player.playbackState() == QMediaPlayer.PlayingState:
+            self.btn_play_toggle.setText("일시정지")
+        else:
+            self.btn_play_toggle.setText("재생")
+
+    def _on_color_changed(self, text):
+        """색상 콤보박스 변경 시 해당 위치 색상을 수정한다."""
+        key_map = {"현재": "current", "지난": "past", "다가올": "future"}
+        key = key_map.get(text, "current")
+        c = QColorDialog.getColor(QColor(self._color_state[key]), self, f"{text} 색상")
+        if c.isValid():
+            self._color_state[key] = c.name()
+            self._save_settings()
+
     def preview_play(self):
         audio_path = self.audio_edit.text().strip()
         if not audio_path or not os.path.exists(audio_path):
@@ -1358,6 +1390,7 @@ class MainWindow(QWidget):
         self._player.setSource(QUrl.fromLocalFile(audio_path))
         self._player.play()
         self._preview_timer.start()
+        self._update_play_btn()
 
     def preview_pause(self):
         if self._player is not None:
@@ -1365,6 +1398,7 @@ class MainWindow(QWidget):
             if self._preview_timer is not None:
                 self._preview_timer.stop()
         self._clear_preview_highlight()
+        self._update_play_btn()
 
     def preview_stop(self):
         if self._player is not None:
@@ -1374,6 +1408,7 @@ class MainWindow(QWidget):
         self.preview_lyric_label.setText("")
         self.preview_time_label.setText("0:00.00 / 0:00.00")
         self._clear_preview_highlight()
+        self._update_play_btn()
 
     def _on_speed_changed(self, text):
         rate = float(text.replace("x", ""))

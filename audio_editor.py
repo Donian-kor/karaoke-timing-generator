@@ -13,7 +13,7 @@ from PySide6 import QtCore
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
     QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox,
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -38,6 +38,111 @@ _PG_TRANSLATIONS = {
     "%": "%",
     "0": "0",
 }
+
+# ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
+DESIGN_TOKENS = {
+    "colors": {
+        "primary": "#2563EB",
+        "primary_hover": "#1D4ED8",
+        "primary_pressed": "#1E40AF",
+        "accent": "#F97316",
+        "success": "#22C55E",
+        "danger": "#EF4444",
+        "warning": "#EAB308",
+        "neutral-50": "#F8FAFC",
+        "neutral-100": "#F1F5F9",
+        "neutral-200": "#E2E8F0",
+        "neutral-900": "#1E293B",
+        "text-secondary": "#64748B",
+        "border": "#E2E8F0",
+        "input_bg": "#FFFFFF",
+        "focus_ring": "#2563EB",
+    },
+    "spacing": {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32},
+    "radius": {"sm": 4, "md": 8, "lg": 12},
+    "font": {
+        "size_small": 9,
+        "size_base": 11,
+        "size_large": 14,
+        "size_xl": 18,
+        "family": "Inter, Segoe UI, sans-serif",
+    },
+}
+
+
+def _build_design_qss() -> str:
+    c = DESIGN_TOKENS["colors"]
+    r = DESIGN_TOKENS["radius"]
+    f = DESIGN_TOKENS["font"]
+    return f"""
+        QDialog {{
+            font-family: {f['family']};
+            font-size: {f['size_base']}pt;
+            color: {c['neutral-900']};
+            background-color: {c['neutral-50']};
+        }}
+        QLabel[accent="true"] {{ color: {c['primary']}; font-weight: 700; }}
+        QLabel[textColor="secondary"] {{ color: {c['text-secondary']}; }}
+        QPushButton {{
+            background-color: {c['primary']};
+            color: white;
+            padding: 6px 16px;
+            border-radius: {r['md']}px;
+            border: none;
+            font-weight: 600;
+            min-height: 28px;
+        }}
+        QPushButton:hover {{ background-color: {c['primary_hover']}; }}
+        QPushButton:pressed {{ background-color: {c['primary_pressed']}; }}
+        QPushButton:disabled {{ background-color: #94A3B8; }}
+        QPushButton[secondary="true"] {{
+            background-color: {c['neutral-100']};
+            color: {c['neutral-900']};
+        }}
+        QPushButton[secondary="true"]:hover {{ background-color: {c['neutral-200']}; }}
+        QPushButton[success="true"] {{ background-color: {c['success']}; }}
+        QPushButton[danger="true"] {{ background-color: {c['danger']}; }}
+        QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+            border: 1px solid {c['border']};
+            border-radius: {r['sm']}px;
+            padding: 6px 10px;
+            background-color: {c['input_bg']};
+            min-height: 28px;
+        }}
+        QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
+            border-color: {c['focus_ring']};
+            border-width: 2px;
+        }}
+        QFrame[section="true"] {{
+            border: 1px solid {c['border']};
+            border-radius: {r['md']}px;
+            background-color: {c['neutral-50']};
+        }}
+        QFrame[selected="true"] {{
+            border: 3px solid {c['danger']};
+            border-radius: {r['md']}px;
+        }}
+        QFrame[selected="false"] {{
+            border: 1px solid {c['neutral-200']};
+            border-radius: {r['md']}px;
+        }}
+        QScrollBar:vertical {{
+            width: 10px;
+            background: {c['neutral-100']};
+            border-radius: 5px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {c['text-secondary']};
+            border-radius: 5px;
+            min-height: 30px;
+        }}
+        QScrollBar::handle:vertical:hover {{ background: {c['neutral-900']}; }}
+    """
+
+
+def _apply_design_system(app):
+    app.setStyleSheet(_build_design_qss())
+
 
 _PG_HTML_TRANSLATIONS = {
     "Links this axis with another view. When linked, both views will display the same data range.":
@@ -260,6 +365,7 @@ class AudioEditorDialog(QDialog):
         self._clipboard = None    # 구간 복사/붙여넣기 클립보드
         self._loop_mode = False   # 선택 구간 반복 재생 모드
 
+        _apply_design_system(QApplication.instance())
         self._build_ui()
 
     # ---------- UI ----------
@@ -271,19 +377,24 @@ class AudioEditorDialog(QDialog):
         toolbar = QHBoxLayout()
         btn_open1 = QPushButton("반주 열기")
         btn_open1.clicked.connect(lambda: self.open_track(1))
+        btn_open1.setProperty("secondary", True)
         toolbar.addWidget(btn_open1)
         btn_open2 = QPushButton("보컬 열기")
         btn_open2.clicked.connect(lambda: self.open_track(2))
+        btn_open2.setProperty("secondary", True)
         toolbar.addWidget(btn_open2)
         toolbar.addSpacing(12)
         btn_play = QPushButton("▶ 재생")
         btn_play.clicked.connect(lambda: self.play_current())
+        btn_play.setProperty("success", True)
         toolbar.addWidget(btn_play)
         btn_stop = QPushButton("■ 정지")
         btn_stop.clicked.connect(self.stop_playback)
+        btn_stop.setProperty("secondary", True)
         toolbar.addWidget(btn_stop)
         toolbar.addSpacing(12)
         self.time_label = QLabel("0.00 / 0.00")
+        self.time_label.setProperty("textColor", "secondary")
         self.time_label.setStyleSheet("font-weight:700; font-size:14px;")
         toolbar.addWidget(self.time_label)
         toolbar.addStretch(1)
@@ -420,47 +531,59 @@ class AudioEditorDialog(QDialog):
         # 트리밍
         trim_frame = QFrame()
         trim_frame.setFrameShape(QFrame.StyledPanel)
+        trim_frame.setProperty("section", True)
         trim_layout = QHBoxLayout(trim_frame)
         trim_layout.addWidget(QLabel("선택 구간:"))
         self.lbl_selection = QLabel("드래그로 선택하세요")
-        self.lbl_selection.setStyleSheet("color: #1d4ed8; font-weight: bold;")
+        self.lbl_selection.setProperty("accent", True)
         trim_layout.addWidget(self.lbl_selection)
         trim_layout.addStretch(1)
         btn_keep = QPushButton("선택 구간만 남기기")
         btn_keep.clicked.connect(self.trim_keep)
+        btn_keep.setProperty("secondary", True)
         trim_layout.addWidget(btn_keep)
         btn_del = QPushButton("선택 구간 음소거 (Del)")
         btn_del.clicked.connect(self.delete_selection_silence)
+        btn_del.setProperty("danger", True)
         trim_layout.addWidget(btn_del)
         btn_cut = QPushButton("선택 구간 잘라내기")
         btn_cut.clicked.connect(self.trim_delete)
+        btn_cut.setProperty("danger", True)
         trim_layout.addWidget(btn_cut)
         btn_export = QPushButton("선택 구간 내보내기")
         btn_export.clicked.connect(self.trim_export_selected)
+        btn_export.setProperty("success", True)
         trim_layout.addWidget(btn_export)
         btn_norm = QPushButton("정규화 (볼륨 최대치 맞춤)")
         btn_norm.clicked.connect(self.normalize_track)
+        btn_norm.setProperty("success", True)
         trim_layout.addWidget(btn_norm)
         btn_fade = QPushButton("페이드 인/아웃")
         btn_fade.clicked.connect(self.fade_in_out)
+        btn_fade.setProperty("success", True)
         trim_layout.addWidget(btn_fade)
         btn_copy = QPushButton("선택 구간 복사")
         btn_copy.clicked.connect(self.copy_selection)
+        btn_copy.setProperty("secondary", True)
         trim_layout.addWidget(btn_copy)
         btn_paste = QPushButton("클립보드 붙여넣기")
         btn_paste.clicked.connect(self.paste_clipboard)
+        btn_paste.setProperty("secondary", True)
         trim_layout.addWidget(btn_paste)
         btn_loop = QPushButton("선택 구간 반복 재생")
         btn_loop.clicked.connect(self.loop_play)
+        btn_loop.setProperty("success", True)
         trim_layout.addWidget(btn_loop)
         btn_undo = QPushButton("되돌리기 (Ctrl+Z)")
         btn_undo.clicked.connect(self.undo)
+        btn_undo.setProperty("secondary", True)
         trim_layout.addWidget(btn_undo)
         layout.addWidget(trim_frame)
 
         # 잡음 제거
         noise_frame = QFrame()
         noise_frame.setFrameShape(QFrame.StyledPanel)
+        noise_frame.setProperty("section", True)
         noise_layout = QHBoxLayout(noise_frame)
         noise_layout.addWidget(QLabel("잡음 구간 시작(초):"))
         self.spin_nstart = QDoubleSpinBox()
@@ -474,9 +597,11 @@ class AudioEditorDialog(QDialog):
         noise_layout.addWidget(self.spin_nend)
         btn_noise_sel = QPushButton("잡음 구간으로 제거")
         btn_noise_sel.clicked.connect(self.noise_reduce_selected)
+        btn_noise_sel.setProperty("secondary", True)
         noise_layout.addWidget(btn_noise_sel)
         btn_noise_auto = QPushButton("자동 잡음 제거")
         btn_noise_auto.clicked.connect(self.noise_reduce_auto)
+        btn_noise_auto.setProperty("secondary", True)
         noise_layout.addWidget(btn_noise_auto)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -487,22 +612,28 @@ class AudioEditorDialog(QDialog):
         # 믹싱 / 저장
         mix_frame = QFrame()
         mix_frame.setFrameShape(QFrame.StyledPanel)
+        mix_frame.setProperty("section", True)
         mix_layout = QHBoxLayout(mix_frame)
         btn_mix = QPushButton("믹싱 미리보기 (1+2)")
         btn_mix.clicked.connect(self.mix_tracks)
+        btn_mix.setProperty("success", True)
         mix_layout.addWidget(btn_mix)
         btn_save1 = QPushButton("1번 트랙 저장")
         btn_save1.clicked.connect(lambda: self.save_track(1))
+        btn_save1.setProperty("secondary", True)
         mix_layout.addWidget(btn_save1)
         btn_save2 = QPushButton("2번 트랙 저장")
         btn_save2.clicked.connect(lambda: self.save_track(2))
+        btn_save2.setProperty("secondary", True)
         mix_layout.addWidget(btn_save2)
         btn_save_both = QPushButton("두 트랙 따로 저장")
         btn_save_both.clicked.connect(self.save_both_tracks)
+        btn_save_both.setProperty("secondary", True)
         mix_layout.addWidget(btn_save_both)
         btn_save_res = QPushButton("믹스 미리보기 저장")
         btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
         btn_save_res.clicked.connect(self.save_result)
+        btn_save_res.setProperty("secondary", True)
         mix_layout.addWidget(btn_save_res)
         mix_layout.addStretch(1)
         layout.addWidget(mix_frame)
@@ -563,7 +694,7 @@ class AudioEditorDialog(QDialog):
         row.addWidget(solo)
         v.addLayout(row)
         info = QLabel("(없음)")
-        info.setStyleSheet("color: #334155; border: none; font-size: 11px;")
+        info.setProperty("textColor", "secondary")
         v.addWidget(info)
         # 트랙 높이 조절 슬라이더
         height = QSlider(Qt.Horizontal)
@@ -611,14 +742,16 @@ class AudioEditorDialog(QDialog):
 
     def _update_target_highlight(self):
         """현재 편집 대상 트랙의 파형에 강조 테두리를 입힌다."""
-        selected_style = "border: 3px solid #dc2626; border-radius: 4px;"
-        normal_style = "border: 1px solid #334155; border-radius: 4px;"
         if self._edit_track == 1:
-            self.plot1.setStyleSheet(selected_style)
-            self.plot2.setStyleSheet(normal_style)
+            self.plot1.setProperty("selected", True)
+            self.plot2.setProperty("selected", False)
         else:
-            self.plot1.setStyleSheet(normal_style)
-            self.plot2.setStyleSheet(selected_style)
+            self.plot1.setProperty("selected", False)
+            self.plot2.setProperty("selected", True)
+        self.plot1.style().unpolish(self.plot1)
+        self.plot1.style().polish(self.plot1)
+        self.plot2.style().unpolish(self.plot2)
+        self.plot2.style().polish(self.plot2)
 
     def _on_link_toggled(self, checked):
         # 켜는 순간 현재 편집 트랙의 선택 구간을 두 트랙에 복사한다.
