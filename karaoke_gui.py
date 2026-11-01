@@ -197,6 +197,14 @@ class MainWindow(QWidget):
 
         # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
         self.preview_section = PreviewSection()
+        # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
+        self.preview_lyric_label = self.preview_section.preview_lyric_label
+        self.preview_time_label = self.preview_section.preview_time_label
+        self.preview_slider = self.preview_section.preview_slider
+        self.btn_play_toggle = self.preview_section.btn_play_toggle
+        self.btn_stop = self.preview_section.btn_stop
+        self.speed_combo = self.preview_section.speed_combo
+        self.color_combo = self.preview_section.color_combo
 
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
@@ -687,86 +695,6 @@ class MainWindow(QWidget):
         if audio_path and os.path.exists(audio_path):
             dlg.set_input_path(audio_path)
         dlg.exec()
-
-    def _parse_lrc(self, text):
-        import re
-        lines = []
-        for raw in text.splitlines():
-            m = re.match(r"\s*\[(\d+):(\d+)\.(\d+)\](.*)", raw)
-            if not m:
-                continue
-            mm, ss, cc, lyric = m.groups()
-            # centiseconds (2 digits) or milliseconds (3 digits)
-            if len(cc) >= 3:
-                frac = int(cc) / 1000.0
-            else:
-                frac = int(cc) / 100.0
-            start = int(mm) * 60 + int(ss) + frac
-            lyric = lyric.strip()
-            # Enhanced LRC: strip <...> word tags for display of full line
-            display = re.sub(r"<[^>]*>", "", lyric).strip()
-            if not display:
-                display = lyric
-            lines.append((start, display, lyric))
-        lines.sort(key=lambda x: x[0])
-        return lines
-
-    def _parse_lrc_words(self, text):
-        import re
-        lines = []
-        raw_lines = text.splitlines()
-        # first pass: parse line starts
-        entries = []
-        for raw in raw_lines:
-            m = re.match(r"\s*\[(\d+):(\d+)\.(\d+)\](.*)", raw)
-            if not m:
-                continue
-            mm, ss, cc, lyric = m.groups()
-            if len(cc) >= 3:
-                frac = int(cc) / 1000.0
-            else:
-                frac = int(cc) / 100.0
-            start = int(mm) * 60 + int(ss) + frac
-            entries.append((start, lyric.strip()))
-        entries.sort(key=lambda x: x[0])
-        # build word-level data
-        result = []
-        for i, (start, lyric) in enumerate(entries):
-            next_start = entries[i + 1][0] if i + 1 < len(entries) else start + 10.0
-            # find word tags <mm:ss.cc>word
-            word_matches = list(re.finditer(r"<(\d+):(\d+)\.(\d+)>([^<]*)", lyric))
-            words = []
-            if word_matches:
-                for j, wm in enumerate(word_matches):
-                    mm, ss, cc, wtext = wm.groups()
-                    if len(cc) >= 3:
-                        frac = int(cc) / 1000.0
-                    else:
-                        frac = int(cc) / 100.0
-                    wstart = int(mm) * 60 + int(ss) + frac
-                    # end = next word start or line end
-                    if j + 1 < len(word_matches):
-                        nm = word_matches[j + 1]
-                        ncc = nm.group(3)
-                        if len(ncc) >= 3:
-                            nfrac = int(ncc) / 1000.0
-                        else:
-                            nfrac = int(ncc) / 100.0
-                        wend = int(nm.group(1)) * 60 + int(nm.group(2)) + nfrac
-                    else:
-                        wend = next_start
-                    wtext = wtext.strip()
-                    if wtext:
-                        words.append((wstart, wend, wtext))
-            if not words:
-                # fallback: whole line as one word
-                display = re.sub(r"<[^>]*>", "", lyric).strip()
-                if display:
-                    words = [(start, next_start, display)]
-            # full display text
-            full = re.sub(r"<[^>]*>", "", lyric).strip()
-            result.append((start, next_start, words, full))
-        return result
 
     def _ensure_player(self):
         if self._player is None:
