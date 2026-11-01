@@ -204,7 +204,7 @@ class SettingsSection(QFrame):
         if self._collapsed:
             self.btn_collapse.setText("▼ 펼치기")
             # 제목 행만 보이도록 최소 높이 설정
-            self.setMaximumHeight(45)
+            self.setMaximumHeight(55)
         else:
             self.btn_collapse.setText("▲ 접기")
             self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
