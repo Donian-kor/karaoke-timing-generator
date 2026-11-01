@@ -55,19 +55,15 @@ class SettingsSection(QFrame):
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
-        # 섹션 제목 행 (제목 + 접기/펼치기 버튼)
+        # 섹션 제목 행
         title_row = QHBoxLayout()
         title = QLabel("오디오 파일 설정")
         title.setProperty("sectionTitle", True)
         title.setCursor(Qt.PointingHandCursor)
+        title.setToolTip("클릭하여 접기/펼치기")
         title.mousePressEvent = lambda event: self._toggle_collapse()
         title_row.addWidget(title)
         title_row.addStretch(1)
-        self.btn_collapse = QPushButton("▲ 접기")
-        self.btn_collapse.setProperty("secondary", True)
-        self.btn_collapse.setFixedWidth(70)
-        self.btn_collapse.clicked.connect(self._toggle_collapse)
-        title_row.addWidget(self.btn_collapse)
         layout.addLayout(title_row)
         self._title_row = title_row
 
@@ -204,7 +200,6 @@ class SettingsSection(QFrame):
         self._collapsed = not self._collapsed
         self._content.setVisible(not self._collapsed)
         if self._collapsed:
-            self.btn_collapse.setText("▼ 펼치기")
             # 제목 행만 보이도록 최소 높이 설정
             # 콘텐츠 숨김 시 레이아웃 간격/마진 최소화
             self._content_layout.setSpacing(0)
@@ -213,7 +208,6 @@ class SettingsSection(QFrame):
             # 제목 행만 보이도록 높이 설정
             self.setMaximumHeight(65)
         else:
-            self.btn_collapse.setText("▲ 접기")
             self._content_layout.setSpacing(12)
             self.layout().setSpacing(12)
             self.layout().setContentsMargins(8, 8, 2, 8)
