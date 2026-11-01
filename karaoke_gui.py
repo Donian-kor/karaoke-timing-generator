@@ -506,6 +506,19 @@ class MainWindow(QWidget):
         self.btn_audio_edit.clicked.connect(self.open_audio_editor)
         prow_row2.addWidget(self.btn_audio_edit)
 
+        # 타이밍 오프셋 (하단 섹션)
+        prow_row2.addWidget(QLabel("오프셋(ms):"))
+        self.offset_spin = QSpinBox()
+        self.offset_spin.setRange(-5000, 5000)
+        self.offset_spin.setSingleStep(10)
+        self.offset_spin.setValue(0)
+        self.offset_spin.setFixedWidth(110)
+        self.offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        prow_row2.addWidget(self.offset_spin)
+        self.btn_offset = QPushButton("적용")
+        self.btn_offset.clicked.connect(self.apply_offset)
+        prow_row2.addWidget(self.btn_offset)
+
         lyrics_layout.addLayout(prow_row2)
 
         # ── 재생 미리보기 섹션 (상단 프레임) ─────────────────────
@@ -560,18 +573,6 @@ class MainWindow(QWidget):
         self.speed_combo.setCurrentText("1.0x")
         self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
         prow_row1.addWidget(self.speed_combo)
-        # 타이밍 오프셋
-        prow_row1.addWidget(QLabel("오프셋(ms):"))
-        self.offset_spin = QSpinBox()
-        self.offset_spin.setRange(-5000, 5000)
-        self.offset_spin.setSingleStep(10)
-        self.offset_spin.setValue(0)
-        self.offset_spin.setFixedWidth(110)
-        self.offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        prow_row1.addWidget(self.offset_spin)
-        self.btn_offset = QPushButton("적용")
-        self.btn_offset.clicked.connect(self.apply_offset)
-        prow_row1.addWidget(self.btn_offset)
         prow_row1.addStretch(1)
         prow_row1.addWidget(QLabel("색상:"))
         def make_color_btn(key, label):
