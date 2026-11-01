@@ -67,6 +67,7 @@ class SettingsSection(QFrame):
         self.btn_collapse.clicked.connect(self._toggle_collapse)
         title_row.addWidget(self.btn_collapse)
         layout.addLayout(title_row)
+        self._title_row = title_row
 
         # 콘텐츠 영역 (접기/펼치기 대상)
         self._content = QWidget()
@@ -202,7 +203,8 @@ class SettingsSection(QFrame):
         self._content.setVisible(not self._collapsed)
         if self._collapsed:
             self.btn_collapse.setText("▼ 펼치기")
-            self.setMaximumHeight(40)
+            # 제목 행만 보이도록 최소 높이 설정
+            self.setMaximumHeight(45)
         else:
             self.btn_collapse.setText("▲ 접기")
             self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
