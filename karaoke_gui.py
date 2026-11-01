@@ -37,6 +37,105 @@ def _quiet_ffmpeg_noise():
 
 _quiet_ffmpeg_noise()
 
+# ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
+DESIGN_TOKENS = {
+    "colors": {
+        "primary": "#2563EB",
+        "primary_hover": "#1D4ED8",
+        "primary_pressed": "#1E40AF",
+        "accent": "#F97316",
+        "success": "#22C55E",
+        "danger": "#EF4444",
+        "warning": "#EAB308",
+        "neutral-50": "#F8FAFC",
+        "neutral-100": "#F1F5F9",
+        "neutral-200": "#E2E8F0",
+        "neutral-900": "#1E293B",
+        "text-secondary": "#64748B",
+        "border": "#E2E8F0",
+        "input_bg": "#FFFFFF",
+        "focus_ring": "#2563EB",
+    },
+    "spacing": {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32},
+    "radius": {"sm": 4, "md": 8, "lg": 12},
+    "font": {
+        "size_small": 9,
+        "size_base": 11,
+        "size_large": 14,
+        "size_xl": 18,
+        "family": "Inter, Segoe UI, sans-serif",
+    },
+}
+
+
+def _build_design_qss() -> str:
+    c = DESIGN_TOKENS["colors"]
+    r = DESIGN_TOKENS["radius"]
+    s = DESIGN_TOKENS["spacing"]
+    f = DESIGN_TOKENS["font"]
+    return f"""
+        QWidget {{
+            font-family: {f['family']};
+            font-size: {f['size_base']}pt;
+            color: {c['neutral-900']};
+            background-color: {c['neutral-50']};
+        }}
+        QLabel {{ color: {c['neutral-900']}; background-color: transparent; }}
+        QLabel[textColor="secondary"] {{ color: {c['text-secondary']}; }}
+        QPushButton {{
+            background-color: {c['primary']};
+            color: white;
+            padding: 6px 16px;
+            border-radius: {r['md']}px;
+            border: none;
+            font-weight: 600;
+            min-height: 28px;
+        }}
+        QPushButton:hover {{ background-color: {c['primary_hover']}; }}
+        QPushButton:pressed {{ background-color: {c['primary_pressed']}; }}
+        QPushButton:disabled {{ background-color: #94A3B8; }}
+        QPushButton[secondary="true"] {{
+            background-color: {c['neutral-100']};
+            color: {c['neutral-900']};
+        }}
+        QPushButton[secondary="true"]:hover {{ background-color: {c['neutral-200']}; }}
+        QPushButton[success="true"] {{ background-color: {c['success']}; }}
+        QPushButton[danger="true"] {{ background-color: {c['danger']}; }}
+        QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+            border: 1px solid {c['border']};
+            border-radius: {r['sm']}px;
+            padding: 6px 10px;
+            background-color: {c['input_bg']};
+            min-height: 28px;
+        }}
+        QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
+            border-color: {c['focus_ring']};
+            border-width: 2px;
+        }}
+        QFrame[section="true"] {{
+            border: 1px solid {c['border']};
+            border-radius: {r['md']}px;
+            background-color: {c['neutral-50']};
+        }}
+        QScrollBar:vertical {{
+            width: 10px;
+            background: {c['neutral-100']};
+            border-radius: 5px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {c['text-secondary']};
+            border-radius: 5px;
+            min-height: 30px;
+        }}
+        QScrollBar::handle:vertical:hover {{ background: {c['neutral-900']}; }}
+    """
+
+
+def _apply_design_system(app):
+    app.setStyleSheet(_build_design_qss())
+
+
+
 import requests
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QUrl, QEvent, QRegularExpression
 from PySide6.QtWidgets import (
@@ -339,27 +438,30 @@ class MainWindow(QWidget):
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
-        # 설정 섹션 (연한 파랑)
+        # 설정 섹션
         top_widget = QFrame()
         top_widget.setObjectName("settingsSection")
-        top_widget.setStyleSheet(
-            "QFrame#settingsSection { border: 1px solid #b9cde6; border-radius: 8px; background: #e8f0fa; }"
-        )
+        top_widget.setProperty("section", True)
         top_layout = QVBoxLayout(top_widget)
-        top_layout.setContentsMargins(10, 10, 10, 10)
-        top_layout.setSpacing(8)
+        top_layout.setContentsMargins(16, 16, 16, 16)
+        top_layout.setSpacing(12)
 
         row = QHBoxLayout()
         self.server_status = QLabel("서버 상태: 확인 중...")
+        self.server_status.setProperty("textColor", "secondary")
         row.addWidget(self.server_status)
+        row.addStretch(1)
         self.btn_server = QPushButton("서버 시작")
         self.btn_server.clicked.connect(self.start_server)
+        self.btn_server.setProperty("success", True)
         row.addWidget(self.btn_server)
         self.btn_stop_server = QPushButton("서버 중지")
         self.btn_stop_server.clicked.connect(self.stop_server)
+        self.btn_stop_server.setProperty("danger", True)
         row.addWidget(self.btn_stop_server)
         self.btn_health = QPushButton("상태 확인")
         self.btn_health.clicked.connect(self.check_health)
+        self.btn_health.setProperty("secondary", True)
         row.addWidget(self.btn_health)
         top_layout.addLayout(row)
 
@@ -368,13 +470,14 @@ class MainWindow(QWidget):
         self.audio_edit = QLineEdit()
         row.addWidget(self.audio_edit, 1)
         btn_browse = QPushButton("찾기")
+        btn_browse.setProperty("secondary", True)
         btn_browse.clicked.connect(self.browse_audio)
         row.addWidget(btn_browse)
         top_layout.addLayout(row)
 
         # 1행: 언어 / 모델 / 연산
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         row.addWidget(QLabel("언어:"))
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["ko", "en", "ja", "zh", "es", "fr", "de", "ru"])
@@ -395,20 +498,19 @@ class MainWindow(QWidget):
         row.addWidget(self.compute_combo)
         self.compute_combo.currentTextChanged.connect(lambda _: self._save_settings())
         self.model_combo.currentTextChanged.connect(lambda _: self._update_compute_combo())
-        # 남는 가로 공간은 라벨이 아니라 이 stretch가 차지하게 해서
-        # 라벨과 콤보박스 사이가 벌어지지 않도록 한다.
         row.addStretch(1)
         top_layout.addLayout(row)
 
         # 2행: ACE-Step 곡 선택
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         row.addWidget(QLabel("ACE-Step 곡:"))
         self.song_combo = QComboBox()
         self.song_combo.addItem("(직접 입력)")
         row.addWidget(self.song_combo, 1)
         btn_refresh = QPushButton("새로고침")
         btn_refresh.setFixedWidth(80)
+        btn_refresh.setProperty("secondary", True)
         btn_refresh.clicked.connect(self._load_ace_songs)
         row.addWidget(btn_refresh)
         top_layout.addLayout(row)
@@ -417,13 +519,16 @@ class MainWindow(QWidget):
         row = QHBoxLayout()
         self.btn_gen = QPushButton("타이밍 생성")
         self.btn_gen.clicked.connect(self.generate)
+        self.btn_gen.setProperty("success", True)
         row.addWidget(self.btn_gen)
         self.btn_cancel = QPushButton("취소")
         self.btn_cancel.clicked.connect(self.cancel_generation)
         self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setProperty("secondary", True)
         row.addWidget(self.btn_cancel)
         self.btn_audio_edit = QPushButton("오디오 편집")
         self.btn_audio_edit.clicked.connect(self.open_audio_editor)
+        self.btn_audio_edit.setProperty("secondary", True)
         row.addWidget(self.btn_audio_edit)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -434,12 +539,10 @@ class MainWindow(QWidget):
         # ── 가사 / LRC 섹션 (하단 프레임) ─────────────────────────
         lyrics_frame = QFrame()
         lyrics_frame.setObjectName("lyricsSection")
-        lyrics_frame.setStyleSheet(
-            "QFrame#lyricsSection { border: 1px solid #b9dcc0; border-radius: 8px; background: #ecf7ee; }"
-        )
+        lyrics_frame.setProperty("section", True)
         lyrics_layout = QVBoxLayout(lyrics_frame)
-        lyrics_layout.setContentsMargins(10, 10, 10, 10)
-        lyrics_layout.setSpacing(8)
+        lyrics_layout.setContentsMargins(16, 16, 16, 16)
+        lyrics_layout.setSpacing(12)
 
         split = QSplitter(Qt.Horizontal)
         left_widget = QWidget()
@@ -448,7 +551,6 @@ class MainWindow(QWidget):
         left_layout.addWidget(QLabel("원본 가사 (입력):"))
         self.lyrics_edit = QTextEdit()
         self.lyrics_edit.setPlaceholderText("원본 가사를 여기에 입력하세요.\n(입력하면 Whisper가 이 가사를 기준으로 타이밍을 생성합니다)")
-        self.lyrics_edit.setStyleSheet(f"font-family: Inter, \"Segoe UI\", sans-serif; font-size: {self._font_sizes.get('lyrics', 13)}px;")
         self.lyrics_edit.installEventFilter(self)
         left_layout.addWidget(self.lyrics_edit, 1)
         split.addWidget(left_widget)
@@ -459,7 +561,6 @@ class MainWindow(QWidget):
         right_layout.addWidget(QLabel("생성된 LRC (편집 가능):"))
         self.preview = QTextEdit()
         self.preview.setReadOnly(False)
-        self.preview.setStyleSheet(f"font-family: Inter, \"Segoe UI\", sans-serif; font-size: {self._font_sizes.get('preview', 13)}px;")
         self.preview.installEventFilter(self)
         self._highlighter = LrcHighlighter(self.preview.document())
         right_layout.addWidget(self.preview, 1)
@@ -471,13 +572,17 @@ class MainWindow(QWidget):
         btn_row = QHBoxLayout()
         self.btn_apply = QPushButton("Ace Step Studio에 적용")
         self.btn_apply.clicked.connect(self.apply_to_ace)
+        self.btn_apply.setProperty("success", True)
         btn_row.addWidget(self.btn_apply)
         self.btn_compare = QPushButton("LRC 비교")
         self.btn_compare.clicked.connect(self.compare_lrc)
+        self.btn_compare.setProperty("secondary", True)
         btn_row.addWidget(self.btn_compare)
         self.btn_revert = QPushButton("원본 복원")
         self.btn_revert.clicked.connect(self.revert_lrc)
+        self.btn_revert.setProperty("secondary", True)
         btn_row.addWidget(self.btn_revert)
+        btn_row.addStretch(1)
         lyrics_layout.addLayout(btn_row)
 
         # 줄 시간 맞추기 & 노래 시작 자동 맞춤 (하단 섹션: 우측 정렬)
@@ -495,8 +600,6 @@ class MainWindow(QWidget):
         self.line_offset_spin.setSingleStep(10)
         self.line_offset_spin.setValue(0)
         self.line_offset_spin.setFixedWidth(110)
-        self.line_offset_spin.setStyleSheet(
-            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
         prow_row2.addWidget(self.line_offset_spin)
         self.btn_line_offset = QPushButton("현재 줄 적용")
         self.btn_line_offset.setToolTip(
@@ -511,6 +614,17 @@ class MainWindow(QWidget):
         self.offset_spin.setSingleStep(10)
         self.offset_spin.setValue(0)
         self.offset_spin.setFixedWidth(110)
+        prow_row2.addWidget(self.offset_spin)
+        self.btn_offset = QPushButton("적용")
+        self.btn_offset.clicked.connect(self.apply_offset)
+        self.btn_offset.setProperty("secondary", True)
+        prow_row2.addWidget(self.btn_offset)
+        prow_row2.addWidget(QLabel("전체 줄 맞추기(ms):"))
+        self.offset_spin = QSpinBox()
+        self.offset_spin.setRange(-5000, 5000)
+        self.offset_spin.setSingleStep(10)
+        self.offset_spin.setValue(0)
+        self.offset_spin.setFixedWidth(110)
         self.offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
         prow_row2.addWidget(self.offset_spin)
         self.btn_offset = QPushButton("적용")
@@ -519,37 +633,35 @@ class MainWindow(QWidget):
 
         lyrics_layout.addLayout(prow_row2)
 
-        # ── 재생 미리보기 섹션 (상단 프레임) ─────────────────────
+        # ── 재생 미리보기 섹션 ─────────────────────
         preview_frame = QFrame()
         preview_frame.setObjectName("previewSection")
-        preview_frame.setStyleSheet(
-            "QFrame#previewSection { border: 1px solid #cdb9e6; border-radius: 8px; background: #f3ecfb; }"
-        )
+        preview_frame.setProperty("section", True)
         preview_layout = QVBoxLayout(preview_frame)
-        preview_layout.setContentsMargins(10, 10, 10, 10)
-        preview_layout.setSpacing(8)
+        preview_layout.setContentsMargins(16, 16, 16, 16)
+        preview_layout.setSpacing(12)
 
         self.preview_lyric_label = QLabel("")
         self.preview_lyric_label.setAlignment(Qt.AlignCenter)
         self.preview_lyric_label.setFocusPolicy(Qt.ClickFocus)
         self.preview_lyric_label.setWordWrap(True)
         self.preview_lyric_label.setTextFormat(Qt.RichText)
-        self.preview_lyric_label.setMinimumHeight(120)
+        self.preview_lyric_label.setMinimumHeight(100)
         self.preview_lyric_label.setStyleSheet(
-            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 26px; font-weight: 700; color: #ffffff; "
-            "background: #0b0f1a; padding: 24px; border-radius: 10px;"
+            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 20px; font-weight: 700; color: #1E293B; "
+            "background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 1px solid #E2E8F0;"
         )
         preview_layout.addWidget(self.preview_lyric_label, 1)
 
         self.preview_time_label = QLabel("0:00.00 / 0:00.00")
         self.preview_time_label.setAlignment(Qt.AlignCenter)
-        self.preview_time_label.setStyleSheet("color: #1f2937; font-size: 15px; font-weight: 700;")
+        self.preview_time_label.setProperty("textColor", "secondary")
+        self.preview_time_label.setStyleSheet("font-size: 12px; font-weight: 600;")
         preview_layout.addWidget(self.preview_time_label)
 
         # 재생 슬라이드바 (seek)
         self.preview_slider = QSlider(Qt.Horizontal)
         self.preview_slider.setRange(0, 0)
-        self.preview_slider.setStyleSheet("QSlider::groove:horizontal { height: 6px; background: #1f2937; border-radius: 3px; } QSlider::handle:horizontal { width: 12px; background: #60a5fa; border-radius: 6px; margin: -3px 0; }")
         self.preview_slider.sliderMoved.connect(self._on_slider_moved)
         preview_layout.addWidget(self.preview_slider)
 
@@ -557,12 +669,15 @@ class MainWindow(QWidget):
         prow_row1 = QHBoxLayout()
         self.btn_play = QPushButton("재생")
         self.btn_play.clicked.connect(self.preview_play)
+        self.btn_play.setProperty("success", True)
         prow_row1.addWidget(self.btn_play)
         self.btn_pause = QPushButton("일시정지")
         self.btn_pause.clicked.connect(self.preview_pause)
+        self.btn_pause.setProperty("secondary", True)
         prow_row1.addWidget(self.btn_pause)
         self.btn_stop = QPushButton("정지")
         self.btn_stop.clicked.connect(self.preview_stop)
+        self.btn_stop.setProperty("secondary", True)
         prow_row1.addWidget(self.btn_stop)
         # 재생 속도
         prow_row1.addWidget(QLabel("속도:"))
@@ -576,8 +691,9 @@ class MainWindow(QWidget):
         def make_color_btn(key, label):
             btn = QPushButton(label)
             btn.setFixedWidth(70)
+            btn.setProperty("secondary", True)
             def update_style():
-                btn.setStyleSheet(f"background:{self._color_state[key]}; color:#000; font-weight:600; border:1px solid #374151;")
+                btn.setStyleSheet(f"background:{self._color_state[key]}; color:#000; font-weight:600; border:1px solid #E2E8F0; border-radius: 4px;")
             update_style()
             def on_click():
                 c = QColorDialog.getColor(QColor(self._color_state[key]), self, f"{label} 색상")
@@ -1598,6 +1714,7 @@ class MainWindow(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+    _apply_design_system(app)
     # ACE-Step Studio와 동일한 Inter 폰트 로드
     font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "Inter[opsz,wght].ttf")
     if os.path.exists(font_path):
