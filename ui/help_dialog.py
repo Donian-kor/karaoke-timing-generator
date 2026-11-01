@@ -177,10 +177,15 @@ class HelpDialog(QDialog):
         info_layout.setContentsMargins(12, 8, 12, 8)
         info_layout.setSpacing(4)
 
-        author_label = QLabel("제작자: donian  |  GitHub: https://github.com/Donian-kor/karaoke-timing-generator")
+        author_label = QLabel(
+            '제작자: donian  |  GitHub: <a href="https://github.com/Donian-kor/karaoke-timing-generator" '
+            'style="color: #2563EB; text-decoration: none;">https://github.com/Donian-kor/karaoke-timing-generator</a>'
+        )
         author_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #1E293B;")
         author_label.setWordWrap(True)
         author_label.setAlignment(Qt.AlignCenter)
+        author_label.setOpenExternalLinks(True)
+        author_label.setTextFormat(Qt.RichText)
         info_layout.addWidget(author_label)
 
         license_label = QLabel(
