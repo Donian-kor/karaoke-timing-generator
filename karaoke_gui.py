@@ -14,6 +14,10 @@ import soundfile as sf
 
 from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
 from core.transcribe_worker import SERVER_URL, TranscribeWorker
+from core.lrc_parser import (
+    fmt_ts, build_standard_lrc, build_enhanced_lrc,
+    lrc_to_plain_text, parse_lrc_words,
+)
 from ui.preview_section import PreviewSection
 from ui.settings_section import SettingsSection
 from ui.lyrics_section import LyricsSection
@@ -56,67 +60,6 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 ACE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ACE-Step Studio", "data")
 ACE_MEDIA_DIR = os.path.join(ACE_DATA_DIR, "media")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
-
-
-def fmt_ts(seconds: float) -> str:
-    if seconds < 0:
-        seconds = 0.0
-    m = int(seconds // 60)
-    s = int(seconds % 60)
-    cs = int(round((seconds % 1) * 100))
-    if cs >= 100:
-        cs = 99
-    return f"{m:02d}:{s:02d}.{cs:02d}"
-
-
-def build_standard_lrc(segments):
-    lines = []
-    for seg in segments:
-        ts = fmt_ts(seg.get("start", 0.0))
-        text = (seg.get("text") or "").strip()
-        if text:
-            lines.append(f"[{ts}]{text}")
-    return "\n".join(lines) + ("\n" if lines else "")
-
-
-def build_enhanced_lrc(segments):
-    lines = []
-    for seg in segments:
-        ts = fmt_ts(seg.get("start", 0.0))
-        words = seg.get("words") or []
-        if not words:
-            text = (seg.get("text") or "").strip()
-            if text:
-                lines.append(f"[{ts}]{text}")
-            continue
-        parts = [f"[{ts}]"]
-        for w in words:
-            wts = fmt_ts(w.get("start", 0.0))
-            word = (w.get("word") or "").strip()
-            if word:
-                parts.append(f"<{wts}>{word}")
-        lines.append("".join(parts))
-    return "\n".join(lines) + ("\n" if lines else "")
-
-
-def lrc_to_plain_text(lrc):
-    """LRC/Enhanced LRC에서 타임코드를 제거해 일반 가사만 남깁니다."""
-    lines = []
-    for raw in (lrc or "").splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        # [ar:...], [ti:...] 같은 메타데이터 줄은 건너뛴다.
-        if re.match(r"^\[[A-Za-z]+:.*\]$", line):
-            continue
-        # 줄 시작 타임스탬프 제거
-        line = re.sub(r"^(?:\[\d{1,3}:\d{1,2}(?:\.\d{1,3})?\])+\s*", "", line)
-        # 단어 타임스탬프는 공백으로 바꿔 단어가 붙지 않게 한다.
-        line = re.sub(r"<\d{1,3}:\d{1,2}(?:\.\d{1,3})?>", " ", line)
-        line = re.sub(r"\s+", " ", line).strip()
-        if line:
-            lines.append(line)
-    return "\n".join(lines)
 
 
 class LrcHighlighter(QSyntaxHighlighter):
@@ -1054,7 +997,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "경고", "오디오 파일을 선택하세요.")
             return
         lrc_text = self.preview.toPlainText()
-        self._preview_parsed = self._parse_lrc_words(lrc_text)
+        self._preview_parsed = parse_lrc_words(lrc_text)
         if not self._preview_parsed:
             QMessageBox.warning(self, "경고", "LRC 타이밍이 없습니다. 먼저 타이밍을 생성하세요.")
             return
