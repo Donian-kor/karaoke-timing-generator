@@ -178,6 +178,22 @@ class MainWindow(QWidget):
         self.btn_denoise = self.settings_section.btn_denoise
         self.progress = self.settings_section.progress
 
+        # SettingsSection 시그널 연결
+        self.settings_section.server_toggle_clicked.connect(self._on_server_toggle)
+        self.settings_section.health_check_clicked.connect(self.check_health)
+        self.settings_section.audio_browse_clicked.connect(self.browse_audio)
+        self.settings_section.generate_clicked.connect(self.generate)
+        self.settings_section.cancel_clicked.connect(self.cancel_generation)
+        self.settings_section.audio_edit_clicked.connect(self.open_audio_editor)
+        self.settings_section.denoise_clicked.connect(self.open_denoise)
+        self.settings_section.song_selected.connect(self._on_song_selected)
+        self.settings_section.song_refresh_clicked.connect(self._load_ace_songs)
+        self.settings_section.settings_changed.connect(self._save_settings)
+        self.lang_combo.currentTextChanged.connect(lambda _: self._save_settings())
+        self.model_combo.currentTextChanged.connect(lambda _: self._save_settings())
+        self.compute_combo.currentTextChanged.connect(lambda _: self._save_settings())
+        self.model_combo.currentTextChanged.connect(lambda _: self._update_compute_combo())
+
 
         # 가사 / LRC 섹션 (LyricsSection 위젯)
         self.lyrics_section = LyricsSection()
@@ -194,6 +210,14 @@ class MainWindow(QWidget):
         self.btn_offset = self.lyrics_section.btn_offset
         self._highlighter = LrcHighlighter(self.lyrics_section.preview.document())
 
+        # LyricsSection 시그널 연결
+        self.lyrics_section.apply_clicked.connect(self.apply_to_ace)
+        self.lyrics_section.compare_clicked.connect(self.compare_lrc)
+        self.lyrics_section.revert_clicked.connect(self.revert_lrc)
+        self.lyrics_section.auto_offset_clicked.connect(self.apply_auto_offset)
+        self.lyrics_section.line_offset_clicked.connect(self.apply_line_offset)
+        self.lyrics_section.offset_clicked.connect(self.apply_offset)
+
 
         # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
         self.preview_section = PreviewSection()
@@ -205,6 +229,13 @@ class MainWindow(QWidget):
         self.btn_stop = self.preview_section.btn_stop
         self.speed_combo = self.preview_section.speed_combo
         self.color_combo = self.preview_section.color_combo
+
+        # PreviewSection 시그널 연결
+        self.preview_section.play_toggled.connect(self._on_play_toggle)
+        self.preview_section.stop_clicked.connect(self.preview_stop)
+        self.preview_section.slider_moved.connect(self._on_slider_moved)
+        self.preview_section.speed_changed.connect(self._on_speed_changed)
+        self.preview_section.color_changed.connect(self._on_color_changed)
 
 
         # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
