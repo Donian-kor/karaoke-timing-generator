@@ -16,6 +16,7 @@ from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_sys
 from core.transcribe_worker import SERVER_URL, TranscribeWorker
 from ui.preview_section import PreviewSection
 from ui.settings_section import SettingsSection
+from ui.lyrics_section import LyricsSection
 
 
 def _quiet_ffmpeg_noise():
@@ -327,100 +328,21 @@ class MainWindow(QWidget):
         self.progress = self.settings_section.progress
 
 
-        # ── 가사 / LRC 섹션 (하단 프레임) ─────────────────────────
-        lyrics_frame = QFrame()
-        lyrics_frame.setObjectName("lyricsSection")
-        lyrics_frame.setProperty("section", True)
-        lyrics_layout = QVBoxLayout(lyrics_frame)
-        lyrics_layout.setContentsMargins(16, 16, 16, 16)
-        lyrics_layout.setSpacing(12)
+        # 가사 / LRC 섹션 (LyricsSection 위젯)
+        self.lyrics_section = LyricsSection()
+        # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
+        self.lyrics_edit = self.lyrics_section.lyrics_edit
+        self.preview = self.lyrics_section.preview
+        self.btn_apply = self.lyrics_section.btn_apply
+        self.btn_compare = self.lyrics_section.btn_compare
+        self.btn_revert = self.lyrics_section.btn_revert
+        self.btn_auto_offset = self.lyrics_section.btn_auto_offset
+        self.line_offset_spin = self.lyrics_section.line_offset_spin
+        self.btn_line_offset = self.lyrics_section.btn_line_offset
+        self.offset_spin = self.lyrics_section.offset_spin
+        self.btn_offset = self.lyrics_section.btn_offset
+        self._highlighter = LrcHighlighter(self.lyrics_section.preview.document())
 
-        lyrics_title = QLabel("가사 / LRC 편집")
-        lyrics_title.setProperty("sectionTitle", True)
-        lyrics_layout.addWidget(lyrics_title)
-
-        split = QSplitter(Qt.Horizontal)
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("원본 가사 (입력):"))
-        self.lyrics_edit = QTextEdit()
-        self.lyrics_edit.setPlaceholderText("원본 가사를 여기에 입력하세요.\n(입력하면 Whisper가 이 가사를 기준으로 타이밍을 생성합니다)")
-        self.lyrics_edit.installEventFilter(self)
-        left_layout.addWidget(self.lyrics_edit, 1)
-        split.addWidget(left_widget)
-
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("생성된 LRC (편집 가능):"))
-        self.preview = QTextEdit()
-        self.preview.setReadOnly(False)
-        self.preview.installEventFilter(self)
-        self._highlighter = LrcHighlighter(self.preview.document())
-        right_layout.addWidget(self.preview, 1)
-        split.addWidget(right_widget)
-
-        split.setSizes([400, 400])
-        lyrics_layout.addWidget(split, 1)
-
-        btn_row = QHBoxLayout()
-        self.btn_apply = QPushButton("Ace Step Studio에 적용")
-        self.btn_apply.clicked.connect(self.apply_to_ace)
-        self.btn_apply.setProperty("success", True)
-        btn_row.addWidget(self.btn_apply)
-        self.btn_compare = QPushButton("LRC 비교")
-        self.btn_compare.clicked.connect(self.compare_lrc)
-        self.btn_compare.setProperty("secondary", True)
-        btn_row.addWidget(self.btn_compare)
-        self.btn_revert = QPushButton("원본 복원")
-        self.btn_revert.clicked.connect(self.revert_lrc)
-        self.btn_revert.setProperty("secondary", True)
-        btn_row.addWidget(self.btn_revert)
-
-        # 노래 시작 자동 맞춤을 원본 복원 우측으로 재배열
-        self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
-        self.btn_auto_offset.setToolTip(
-            "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
-        self.btn_auto_offset.clicked.connect(self.apply_auto_offset)
-        btn_row.addWidget(self.btn_auto_offset)
-
-        btn_row.addSpacing(16)
-
-        # 선택된 줄 맞춤 그룹 (상단 행으로 끌어올림)
-        btn_row.addWidget(QLabel("선택된 줄 맞춤(ms):"))
-        self.line_offset_spin = QSpinBox()
-        self.line_offset_spin.setRange(-5000, 5000)
-        self.line_offset_spin.setSingleStep(10)
-        self.line_offset_spin.setValue(0)
-        self.line_offset_spin.setFixedWidth(55)
-        self.line_offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        btn_row.addWidget(self.line_offset_spin)
-        self.btn_line_offset = QPushButton("현재 줄 적용")
-        self.btn_line_offset.setToolTip(
-            "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
-        self.btn_line_offset.clicked.connect(self.apply_line_offset)
-        self.btn_line_offset.setProperty("secondary", True)
-        btn_row.addWidget(self.btn_line_offset)
-
-        btn_row.addSpacing(16)
-
-        # 전체 줄 맞추기 그룹 (상단 행으로 끌어올림)
-        btn_row.addWidget(QLabel("전체 줄 맞추기(ms):"))
-        self.offset_spin = QSpinBox()
-        self.offset_spin.setRange(-5000, 5000)
-        self.offset_spin.setSingleStep(10)
-        self.offset_spin.setValue(0)
-        self.offset_spin.setFixedWidth(55)
-        self.offset_spin.setStyleSheet("QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        btn_row.addWidget(self.offset_spin)
-        self.btn_offset = QPushButton("적용")
-        self.btn_offset.clicked.connect(self.apply_offset)
-        self.btn_offset.setProperty("secondary", True)
-        btn_row.addWidget(self.btn_offset)
-
-        btn_row.addStretch(1)
-        lyrics_layout.addLayout(btn_row)
 
         # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
         self.preview_section = PreviewSection()
@@ -430,7 +352,7 @@ class MainWindow(QWidget):
         vsplitter = QSplitter(Qt.Vertical)
         vsplitter.addWidget(self.settings_section)
         vsplitter.addWidget(self.preview_section)
-        vsplitter.addWidget(lyrics_frame)
+        vsplitter.addWidget(self.lyrics_section)
         vsplitter.setSizes([180, 250, 320])
         vsplitter.setStretchFactor(0, 0)
         vsplitter.setStretchFactor(1, 1)
