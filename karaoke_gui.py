@@ -854,14 +854,20 @@ class MainWindow(QWidget):
 
     def _on_play_toggle(self):
         """재생/일시정지 토글."""
+        audio_path = self.audio_edit.text().strip()
         if self._player is None:
             self.preview_play()
         elif self._player.playbackState() == QMediaPlayer.PlayingState:
             self.preview_pause()
         else:
-            self._player.play()
-            if self._preview_timer is not None:
-                self._preview_timer.start()
+            # 오디오 파일이 변경되었으면 소스를 다시 설정
+            current_source = self._player.source().toLocalFile() if self._player.source().isLocalFile() else ""
+            if audio_path and audio_path != current_source:
+                self.preview_play()
+            else:
+                self._player.play()
+                if self._preview_timer is not None:
+                    self._preview_timer.start()
         self._update_play_btn()
 
     def _update_play_btn(self):
@@ -891,6 +897,9 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "경고", "LRC 타이밍이 없습니다. 먼저 타이밍을 생성하세요.")
             return
         self._ensure_player()
+        # 기존 재생 중이면 정지 후 새로 로드
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self._player.stop()
         self._player.setSource(QUrl.fromLocalFile(audio_path))
         self._player.play()
         self._preview_timer.start()
