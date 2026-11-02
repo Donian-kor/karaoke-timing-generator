@@ -845,13 +845,17 @@ class MainWindow(QWidget):
             prev_cursor = QTextCursor(self._last_highlight_block)
             prev_cursor.select(QTextCursor.BlockUnderCursor)
             prev_cursor.mergeCharFormat(QTextCharFormat())
-        # 현재 블록 하이라이트 (커서/선택 영역은 변경하지 않음)
+        # 현재 블록 하이라이트
         cursor = QTextCursor(block)
         cursor.select(QTextCursor.BlockUnderCursor)
         fmt = QTextCharFormat()
         fmt.setBackground(QColor(self._color_state.get("current", "#fbbf24")))
         cursor.mergeCharFormat(fmt)
         self._last_highlight_block = block
+        # 재생 중일 때만 커서 이동 및 자동 스크롤 (일시정지/정지 시 사용자 선택 유지)
+        if self._player is not None and self._player.playbackState() == QMediaPlayer.PlayingState:
+            self.preview.setTextCursor(cursor)
+            self.preview.ensureCursorVisible()
 
     def _clear_preview_highlight(self):
         if self._last_highlight_block is not None and self._last_highlight_block.isValid():
