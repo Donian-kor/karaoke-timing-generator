@@ -27,7 +27,7 @@ DESIGN_TOKENS = {
         "focus_ring": "#1976D2",
     },
     "spacing": {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32},
-    "radius": {"sm": 4, "md": 4, "lg": 8},
+    "radius": {"sm": 0, "md": 0, "lg": 0},
     "font": {
         "size_small": 9,
         "size_base": 11,
@@ -90,6 +90,14 @@ def _build_design_qss() -> str:
         QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
             border-color: {c['focus_ring']};
             border-width: 2px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {c['input_bg']};
+            color: {c['neutral-900']};
+            selection-background-color: #DBEAFE;
+            selection-color: #1E3A8A;
+            border: 1px solid {c['border']};
+            outline: none;
         }}
         QFrame[section="true"] {{
             border: 1px solid {c['border']};
