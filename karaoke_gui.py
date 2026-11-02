@@ -213,6 +213,7 @@ class MainWindow(QWidget):
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
         self.lyrics_edit = self.lyrics_section.lyrics_edit
         self.preview = self.lyrics_section.preview
+        self.preview.textChanged.connect(self._refresh_preview_parsed)
         self.btn_apply = self.lyrics_section.btn_apply
         self.btn_compare = self.lyrics_section.btn_compare
         self.btn_revert = self.lyrics_section.btn_revert
@@ -786,6 +787,13 @@ class MainWindow(QWidget):
             self._preview_timer = QTimer(self)
             self._preview_timer.setInterval(100)
             self._preview_timer.timeout.connect(self._update_preview_lyric)
+
+    def _refresh_preview_parsed(self):
+        """LRC 편집 내용이 변경되면 재생 파싱 결과를 갱신한다."""
+        try:
+            self._preview_parsed = parse_lrc_words(self.preview.toPlainText())
+        except Exception:
+            pass
 
     def _update_preview_lyric(self):
         if self._player is None:
