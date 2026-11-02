@@ -56,7 +56,7 @@ import requests
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QEvent, QRegularExpression
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QMessageBox,
+    QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QCheckBox, QMessageBox,
     QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame, QMenuBar,
 )
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent
@@ -111,6 +111,7 @@ class MainWindow(QWidget):
                 "window_size": [self.width(), self.height()],
                 "splitter_sizes": self.vsplitter.sizes(),
                 "settings_collapsed": self.settings_section.is_collapsed(),
+                "waveform_visible": self.chk_waveform_visible.isChecked(),
             }
             with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -214,6 +215,8 @@ class MainWindow(QWidget):
         view_menu = menubar.addMenu("보기(&V)")
         self.action_link_tracks = view_menu.addAction("두 트랙 함께 선택")
         self.action_link_tracks.setCheckable(True)
+        self.action_waveform_visible = view_menu.addAction("파형 표시")
+        self.action_waveform_visible.setCheckable(True)
 
         tools_menu = menubar.addMenu("도구(&T)")
         tools_menu.addAction(
@@ -325,7 +328,7 @@ class MainWindow(QWidget):
 
         # PreviewSection 시그널 연결
         self.preview_section.play_toggled.connect(self._on_play_toggle)
-        self.preview_section.stop_clicked.connect(self.preview_stop)
+        self.preview_section.stop_clicked.connect(self._stop_integrated_playback)
         self.preview_section.slider_moved.connect(self._on_slider_moved)
         self.preview_slider.sliderPressed.connect(self._on_slider_pressed)
         self.preview_slider.sliderReleased.connect(self._on_slider_released)
@@ -374,6 +377,14 @@ class MainWindow(QWidget):
         offset_toolbar.addWidget(QLabel("싱크:"))
         self.lyrics_section.move_offset_controls_to(offset_toolbar)
         offset_toolbar.addStretch(1)
+        self.chk_waveform_visible = QCheckBox("파형 표시")
+        self.chk_waveform_visible.setChecked(
+            self._settings.get("waveform_visible", True)
+        )
+        self.action_waveform_visible.setChecked(
+            self.chk_waveform_visible.isChecked()
+        )
+        offset_toolbar.addWidget(self.chk_waveform_visible)
         workspace_layout.addLayout(offset_toolbar)
 
         workspace_layout.addWidget(self.preview_section)
@@ -389,6 +400,18 @@ class MainWindow(QWidget):
         self.vsplitter.setStretchFactor(1, 3)
         self.vsplitter.setStretchFactor(2, 2)
         main_layout.addWidget(self.vsplitter, 1)
+        self.chk_waveform_visible.toggled.connect(
+            self._on_waveform_visibility_changed
+        )
+        self.chk_waveform_visible.toggled.connect(
+            self.action_waveform_visible.setChecked
+        )
+        self.action_waveform_visible.toggled.connect(
+            self.chk_waveform_visible.setChecked
+        )
+        self._on_waveform_visibility_changed(
+            self.chk_waveform_visible.isChecked()
+        )
         self.settings_section.set_collapsed(
             self._settings.get("settings_collapsed", True)
         )
@@ -407,14 +430,24 @@ class MainWindow(QWidget):
 
     def _on_settings_collapsed(self, collapsed):
         """설정 섹션 접기/펼치기 시 스플리터 크기를 조정한다."""
+        waveform_visible = self.chk_waveform_visible.isChecked()
         if collapsed:
-            self.vsplitter.setSizes([40, 470, 190])
+            sizes = [40, 470, 190] if waveform_visible else [40, 130, 530]
         else:
             saved = getattr(self.settings_section, '_saved_sizes', None)
             if saved and len(saved) == 3:
-                self.vsplitter.setSizes(saved)
+                sizes = saved
             else:
-                self.vsplitter.setSizes([100, 470, 190])
+                sizes = [100, 470, 190] if waveform_visible else [100, 130, 530]
+        self.vsplitter.setSizes(sizes)
+
+    def _on_waveform_visibility_changed(self, visible):
+        self.audio_editor_panel.setVisible(visible)
+        settings_height = 40 if self.settings_section.is_collapsed() else 100
+        workspace_height, lyrics_height = (470, 190) if visible else (130, 530)
+        self.vsplitter.setSizes(
+            [settings_height, workspace_height, lyrics_height]
+        )
 
     def _on_health_checked(self, ok, model, compute_type):
         if ok:
@@ -884,6 +917,7 @@ class MainWindow(QWidget):
     def open_audio_editor(self):
         audio_path = self.audio_edit.text().strip()
         self.audio_editor_panel.set_lrc_text(self.preview.toPlainText().strip())
+        self.chk_waveform_visible.setChecked(True)
         self._on_audio_path_changed(audio_path)
         self.vsplitter.setSizes([self.settings_section.height(), 470, 190])
 
@@ -1063,11 +1097,12 @@ class MainWindow(QWidget):
     def _on_play_toggle(self):
         """재생/일시정지 토글."""
         if self.audio_editor_panel.is_playing:
-            self.preview_pause()
+            self.audio_editor_panel.pause_playback()
+            self._clear_preview_highlight()
         elif self.audio_editor_panel.is_paused:
             self.audio_editor_panel.resume_playback()
         else:
-            self.preview_play()
+            self._start_integrated_playback()
         self._update_play_btn()
 
     def _update_play_btn(self):
@@ -1086,7 +1121,7 @@ class MainWindow(QWidget):
             self._color_state[key] = c.name()
             self._save_settings()
 
-    def preview_play(self):
+    def _start_integrated_playback(self):
         audio_path = self.audio_edit.text().strip()
         if not audio_path or not os.path.exists(audio_path):
             QMessageBox.warning(self, "경고", "오디오 파일을 선택하세요.")
@@ -1104,12 +1139,7 @@ class MainWindow(QWidget):
         self.audio_editor_panel.play_current()
         self._update_play_btn()
 
-    def preview_pause(self):
-        self.audio_editor_panel.pause_playback()
-        self._clear_preview_highlight()
-        self._update_play_btn()
-
-    def preview_stop(self):
+    def _stop_integrated_playback(self):
         self.audio_editor_panel.stop_playback()
         self.preview_section.preview_lyric_label.setText("")
         self.preview_section.preview_time_label.setText("0:00.00 / 0:00.00")
@@ -1303,12 +1333,7 @@ class MainWindow(QWidget):
             return
         key = event.key()
         if key == Qt.Key_Space:
-            if self.audio_editor_panel.is_playing:
-                self.preview_pause()
-            elif self.audio_editor_panel.is_paused:
-                self.audio_editor_panel.resume_playback()
-            else:
-                self.preview_play()
+            self._on_play_toggle()
             event.accept()
             return
         if key == Qt.Key_Left:

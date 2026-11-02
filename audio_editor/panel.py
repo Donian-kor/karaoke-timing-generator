@@ -285,6 +285,7 @@ class AudioEditorPanel(QWidget):
         self._settings = QSettings("KaraokeTimingGenerator", "AudioEditor")
         self._syncing_region = False
         self._play_total_sec = 0.0
+        self._timeline_total_sec = 0.0
         # 선택 영역을 트랙별로 관리한다.
         self._edit_track = 1      # 편집 대상 트랙 (1/2)
         self._play_track = 1      # 재생 시작점을 가져올 트랙 (1/2/3)
@@ -1045,7 +1046,10 @@ class AudioEditorPanel(QWidget):
         if data is None:
             QMessageBox.information(self, "정보", "재생할 트랙이 없습니다.")
             return
+        self._loop_mode = False
+        self._loop_start = 0.0
         self._play_total_sec = len(data) / sr
+        self._timeline_total_sec = self._play_total_sec
         # 선택 구간이 있으면 그 시작점에서, 없으면 핀포인트 위치에서 재생 시작
         r = self._region_for_track(self._play_track).getRegion()
         if start_sec is not None:
@@ -1065,7 +1069,10 @@ class AudioEditorPanel(QWidget):
         from PySide6.QtMultimedia import QMediaPlayer
         if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             pos = self._player.position() / 1000.0
-            self.play_current(start_sec=pos)
+            if self._loop_mode:
+                self.loop_play(start_sec=pos)
+            else:
+                self.play_current(start_sec=pos)
 
     @staticmethod
     def _parse_ts(mm, ss, frac_s):
@@ -1189,14 +1196,15 @@ class AudioEditorPanel(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "오류", f"저장 실패:\n{e}")
 
-    def _update_subtitles(self):
+    def _update_subtitles(self, position_sec=None):
         """현재 재생 위치를 자막 레인에 반영한다."""
         if not hasattr(self, "sub_lane"):
             return
-        t = 0.0
-        if self._player is not None:
-            t = self._player.position() / 1000.0
-        self.sub_lane.set_playhead(t)
+        if position_sec is None:
+            position_sec = self._player.position() / 1000.0 if self._player else 0.0
+            if self._loop_mode:
+                position_sec += self._loop_start
+        self.sub_lane.set_playhead(float(position_sec))
 
     def _on_lrc_moved(self, index, word_index=-1):
         """자막 줄/단어를 드래그해 시간이 바뀌면 상태 표시줄에 알린다."""
@@ -1221,15 +1229,16 @@ class AudioEditorPanel(QWidget):
             self.play_slider.setValue(int(pos_ms / dur_ms * 1000))
             self.play_slider.blockSignals(False)
         # 플레이헤드 갱신
-        t = pos_ms / 1000.0
-        if getattr(self, "_loop_mode", False):
-            t = getattr(self, "_loop_start", 0.0) + t
+        position_sec = pos_ms / 1000.0
+        if self._loop_mode:
+            position_sec += self._loop_start
+        timeline_total_sec = self._timeline_total_sec or self._play_total_sec
         for ph in (self.playhead1, self.playhead2, self.playhead3):
-            ph.setPos(t)
-        self._update_subtitles()
+            ph.setPos(position_sec)
+        self._update_subtitles(position_sec)
         # 시간 라벨
-        self.time_label.setText(f"{pos_ms / 1000.0:.2f} / {self._play_total_sec:.2f}")
-        self.position_changed.emit(float(t), float(self._play_total_sec))
+        self.time_label.setText(f"{position_sec:.2f} / {timeline_total_sec:.2f}")
+        self.position_changed.emit(position_sec, timeline_total_sec)
 
     def _on_media_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -1256,7 +1265,8 @@ class AudioEditorPanel(QWidget):
 
     @property
     def position_seconds(self):
-        return self._player.position() / 1000.0
+        position_sec = self._player.position() / 1000.0
+        return position_sec + self._loop_start if self._loop_mode else position_sec
 
     def pause_playback(self):
         self._playback_engine.pause()
@@ -1265,21 +1275,30 @@ class AudioEditorPanel(QWidget):
         self._player.play()
 
     def seek_to(self, position_sec):
-        self._playback_engine.seek(float(position_sec) * 1000.0)
+        target_sec = float(position_sec)
+        if self._loop_mode:
+            target_sec -= self._loop_start
+            target_sec = min(max(0.0, target_sec), self._play_total_sec)
+        self._playback_engine.seek(target_sec * 1000.0)
 
     def set_playback_rate(self, rate):
         self._playback_engine.set_playback_rate(rate)
 
     def stop_playback(self):
         self._loop_mode = False
+        self._loop_start = 0.0
         if self._player is not None:
             self._player.stop()
         self.play_slider.setValue(0)
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(0)
-        self.time_label.setText(f"0.00 / {self._play_total_sec:.2f}" if self._play_total_sec else "0.00 / 0.00")
+        timeline_total_sec = self._timeline_total_sec or self._play_total_sec
+        self.time_label.setText(
+            f"0.00 / {timeline_total_sec:.2f}" if timeline_total_sec else "0.00 / 0.00"
+        )
         self.status.setText("정지")
-        self.position_changed.emit(0.0, float(self._play_total_sec))
+        self._update_subtitles(0.0)
+        self.position_changed.emit(0.0, timeline_total_sec)
 
     # ---------- 마우스 선택 ----------
     def _track_for_plot(self, plot):
@@ -1553,7 +1572,7 @@ class AudioEditorPanel(QWidget):
             new_data = np.concatenate([data[:i0], segment, data[i0:]], axis=0)
         self._set_track(which, new_data, sr, f"클립보드 붙여넣기 ({len(segment)} 샘플 삽입)")
 
-    def loop_play(self):
+    def loop_play(self, start_sec=None):
         """선택 구간을 반복 재생한다 (두 트랙 동시 재생)."""
         which = self.combo_target.currentIndex() + 1
         # 두 트랙을 믹싱한 전체 재생 데이터를 먼저 만든다
@@ -1580,13 +1599,17 @@ class AudioEditorPanel(QWidget):
         segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
         self._loop_mode = True
         self._loop_start = s
+        self._timeline_total_sec = len(data) / sr
         self._play_total_sec = len(segment) / sr
-        if not self._playback_engine.play(segment, sr):
+        segment_start = 0.0 if start_sec is None else float(start_sec)
+        segment_start = min(max(0.0, segment_start), max(0.0, self._play_total_sec - 0.01))
+        if not self._playback_engine.play(segment, sr, segment_start):
+            self._loop_mode = False
+            self._loop_start = 0.0
             return
         # 재생 시작 전 플레이헤드를 구간 시작 위치로 설정
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(s)
-        self._player.play()
         self.status.setText(f"선택 구간 반복 재생 중... ({s:.3f}~{e:.3f}초)")
 
     def _adjust_selection_start(self, delta):
