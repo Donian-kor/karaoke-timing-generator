@@ -138,6 +138,10 @@ class SettingsSection(QFrame):
 
         row.addWidget(QLabel("모델:"))
         self.model_combo = QComboBox()
+        self.model_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
         self.model_combo.addItems(["tiny", "base", "small", "medium", "large-v3"])
         self.model_combo.setCurrentText("large-v3")
         self.model_combo.setFixedWidth(100)
@@ -146,6 +150,10 @@ class SettingsSection(QFrame):
 
         row.addWidget(QLabel("연산:"))
         self.compute_combo = QComboBox()
+        self.compute_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
         self.compute_combo.addItems(["int8", "float16", "float32"])
         self.compute_combo.setCurrentText("int8")
         row.addWidget(self.compute_combo)
@@ -159,6 +167,10 @@ class SettingsSection(QFrame):
         row.setSpacing(8)
         row.addWidget(QLabel("ACE-Step 곡:"))
         self.song_combo = QComboBox()
+        self.song_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
         self.song_combo.addItem("(직접 입력)")
         # 긴 곡 제목이 콤보박스/섹션의 권장 크기를 과도하게 키우지 않도록 조정
         self.song_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
