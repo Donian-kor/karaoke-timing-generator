@@ -49,7 +49,9 @@ class _SelectablePlot(pg.PlotWidget):
             self.undo_requested.emit()
             ev.accept()
             return
-        if ev.key() in (Qt.Key_Left, Qt.Key_Right):
+        # 선택 영역 미세 조정은 Shift+좌/우로만 처리하고, 일반 좌/우는
+        # 상위 창의 5초 이동 단축키로 전파한다 (계획서 §5.3).
+        if ev.key() in (Qt.Key_Left, Qt.Key_Right) and (ev.modifiers() & Qt.ShiftModifier):
             adjust_end = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             delta = 0.01 if ev.key() == Qt.Key_Right else -0.01
             self.selection_adjust_requested.emit(delta, adjust_end)

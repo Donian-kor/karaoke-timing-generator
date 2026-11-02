@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QCheckBox, QMessageBox,
     QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame, QMenuBar,
 )
-from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent
+from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent, QShortcut, QKeySequence
 from audio_editor import AudioEditorPanel
 
 ACE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ACE-Step Studio", "data")
@@ -88,6 +88,8 @@ class MainWindow(QWidget):
         self._color_state = self._settings.get("colors", {"current": "#fbbf24", "past": "#6b7280", "future": "#ffffff"})
         self._font_sizes = self._settings.get("font_sizes", {"lyrics": 13, "preview": 13})
         self._build_ui()
+        # 전역 단축키: Ctrl+Space로 재생/일시정지 (텍스트 입력 중에도 동작)
+        QShortcut(QKeySequence("Ctrl+Space"), self, self._on_play_toggle)
         self._load_ace_songs()
         self._apply_settings_to_ui()
 
@@ -395,7 +397,7 @@ class MainWindow(QWidget):
         self.vsplitter.addWidget(self.settings_section)
         self.vsplitter.addWidget(self.audio_workspace)
         self.vsplitter.addWidget(self.lyrics_section)
-        self.vsplitter.setSizes([40, 470, 190])
+        self.vsplitter.setSizes([36, 420, 180])
         self.vsplitter.setStretchFactor(0, 0)
         self.vsplitter.setStretchFactor(1, 3)
         self.vsplitter.setStretchFactor(2, 2)
@@ -962,9 +964,25 @@ class MainWindow(QWidget):
         line_timing = parse_lrc_words(line_text)
         if not line_timing:
             return
+        start = line_timing[0][0]
         self._is_syncing = True
-        self.audio_editor_panel.seek_to(line_timing[0][0])
-        self._is_syncing = False
+        try:
+            self.audio_editor_panel.seek_to(start)
+            # source가 로드되기 전에도 파형 핀포인트/커서/자막은 직접 이동한다
+            for ph in (self.audio_editor_panel.playhead1,
+                       self.audio_editor_panel.playhead2,
+                       self.audio_editor_panel.playhead3):
+                ph.setPos(start)
+            for cur in (self.audio_editor_panel.cursor1,
+                        self.audio_editor_panel.cursor2,
+                        self.audio_editor_panel.cursor3):
+                cur.setPos(start)
+            self.audio_editor_panel._update_subtitles(start)
+            total = (self.audio_editor_panel._timeline_total_sec
+                     or self.audio_editor_panel._play_total_sec)
+            self._update_preview_lyric(start, total)
+        finally:
+            self._is_syncing = False
 
     def _on_subtitle_clicked(self, index, start_sec):
         if self._is_syncing:
@@ -1070,11 +1088,13 @@ class MainWindow(QWidget):
             block = block.next()
             if not block.isValid():
                 return
-        # 이전 하이라이트 제거
+        # 이전 하이라이트 제거 (빈 포맷 merge는 배경색을 지우지 못하므로 투명 배경으로 덮어쓴다)
         if self._last_highlight_block is not None and self._last_highlight_block.isValid():
             prev_cursor = QTextCursor(self._last_highlight_block)
             prev_cursor.select(QTextCursor.BlockUnderCursor)
-            prev_cursor.mergeCharFormat(QTextCharFormat())
+            clear_fmt = QTextCharFormat()
+            clear_fmt.setBackground(QColor(0, 0, 0, 0))
+            prev_cursor.mergeCharFormat(clear_fmt)
         # 현재 블록 하이라이트
         cursor = QTextCursor(block)
         cursor.select(QTextCursor.BlockUnderCursor)
@@ -1091,7 +1111,9 @@ class MainWindow(QWidget):
         if self._last_highlight_block is not None and self._last_highlight_block.isValid():
             cursor = QTextCursor(self._last_highlight_block)
             cursor.select(QTextCursor.BlockUnderCursor)
-            cursor.mergeCharFormat(QTextCharFormat())
+            clear_fmt = QTextCharFormat()
+            clear_fmt.setBackground(QColor(0, 0, 0, 0))
+            cursor.mergeCharFormat(clear_fmt)
             self._last_highlight_block = None
 
     def _on_play_toggle(self):
@@ -1127,10 +1149,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "경고", "오디오 파일을 선택하세요.")
             return
         lrc_text = self.preview.toPlainText()
-        self._preview_parsed = parse_lrc_words(lrc_text)
-        if not self._preview_parsed:
-            QMessageBox.warning(self, "경고", "LRC 타이밍이 없습니다. 먼저 타이밍을 생성하세요.")
-            return
+        self._preview_parsed = parse_lrc_words(lrc_text) if lrc_text.strip() else []
         self.audio_editor_panel.set_lrc_text(lrc_text)
         if self.audio_editor_panel.path1 != audio_path or self.audio_editor_panel.track1 is None:
             self._pending_preview_path = audio_path

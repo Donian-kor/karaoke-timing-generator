@@ -4,7 +4,7 @@ import os
 import tempfile
 
 import soundfile as sf
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QUrl, Signal, QTimer
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 
@@ -26,8 +26,25 @@ class PlaybackEngine(QObject):
         self.player.playbackStateChanged.connect(
             lambda state: self.playback_state_changed.emit(state)
         )
+        # 30ms 폴링 타이머: 재생 중 position_changed를 약 30ms 주기로 보장한다.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(30)
+        self._poll_timer.timeout.connect(self._poll_position)
+        self.player.playbackStateChanged.connect(self._update_poll_timer)
         self._temp_path = None
         self._pending_seek_ms = None
+
+    def _poll_position(self):
+        try:
+            self.position_changed.emit(int(self.player.position()))
+        except Exception:
+            pass
+
+    def _update_poll_timer(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self._poll_timer.start()
+        else:
+            self._poll_timer.stop()
 
     def play(self, data, sample_rate, start_sec=0.0):
         self.player.stop()
@@ -52,9 +69,11 @@ class PlaybackEngine(QObject):
         return True
 
     def stop(self):
+        self._poll_timer.stop()
         self.player.stop()
 
     def pause(self):
+        self._poll_timer.stop()
         self.player.pause()
 
     def seek(self, position_ms):
@@ -64,6 +83,7 @@ class PlaybackEngine(QObject):
         self.player.setPlaybackRate(float(rate))
 
     def cleanup(self):
+        self._poll_timer.stop()
         self.player.stop()
         self.player.setSource(QUrl())
         self._remove_temp_file()

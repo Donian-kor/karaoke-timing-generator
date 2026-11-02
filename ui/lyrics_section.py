@@ -35,7 +35,7 @@ class LyricsSection(QFrame):
         self.setObjectName("lyricsSection")
         self.setProperty("section", True)
         self._build_ui()
-        self.setMinimumHeight(190)
+        self.setMinimumHeight(150)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)

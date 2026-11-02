@@ -45,137 +45,7 @@ _PG_TRANSLATIONS = {
     "0": "0",
 }
 
-# ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
-# pyqtgraph 우클릭 메뉴(영어)를 한국어로 표시하기 위한 번역 사전
-_PG_TRANSLATIONS = {
-    "ViewBox options": "보기 옵션",
-    "View All": "전체 보기",
-    "axis": "축",
-    "Mouse Mode": "마우스 모드",
-    "3 button": "3버튼 (이동)",
-    "1 button": "1버튼 (확대/축소)",
-    "Link Axis:": "축 연결:",
-    "Auto": "자동",
-    "Manual": "수동",
-    "Invert Axis": "축 뒤집기",
-    "Mouse Enabled": "마우스 조작 사용",
-    "Visible Data Only": "보이는 데이터만",
-    "Auto Pan Only": "자동 이동만",
-    "%": "%",
-    "0": "0",
-}
-
-# ─── 디자인 토큰 (pyside6-gui-design 원칙 적용) ───
-DESIGN_TOKENS = {
-    "colors": {
-        "primary": "#1976D2",
-        "primary_hover": "#1565C0",
-        "primary_pressed": "#0D47A1",
-        "accent": "#FF4081",
-        "success": "#4CAF50",
-        "danger": "#F44336",
-        "warning": "#FFC107",
-        "neutral-50": "#FAFAFA",
-        "neutral-100": "#F5F5F5",
-        "neutral-200": "#EEEEEE",
-        "neutral-900": "#212121",
-        "text-secondary": "#757575",
-        "border": "#BDBDBD",
-        "input_bg": "#FFFFFF",
-        "focus_ring": "#1976D2",
-    },
-    "spacing": {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32},
-    "radius": {"sm": 4, "md": 4, "lg": 8},
-    "font": {
-        "size_small": 9,
-        "size_base": 11,
-        "size_large": 14,
-        "size_xl": 18,
-        "family": "Inter, Segoe UI, sans-serif",
-    },
-}
-
-
-def _build_design_qss() -> str:
-    c = DESIGN_TOKENS["colors"]
-    r = DESIGN_TOKENS["radius"]
-    f = DESIGN_TOKENS["font"]
-    return f"""
-        QDialog {{
-            font-family: {f['family']};
-            font-size: {f['size_base']}pt;
-            color: {c['neutral-900']};
-            background-color: {c['neutral-50']};
-        }}
-        QLabel[accent="true"] {{ color: {c['primary']}; font-weight: 700; }}
-        QLabel[textColor="secondary"] {{ color: {c['text-secondary']}; }}
-        QPushButton {{
-            background-color: {c['primary']};
-            color: white;
-            padding: 6px 16px;
-            border-radius: {r['md']}px;
-            border: none;
-            font-weight: 600;
-            min-height: 28px;
-        }}
-        QPushButton:hover {{ background-color: {c['primary_hover']}; }}
-        QPushButton:pressed {{ background-color: {c['primary_pressed']}; padding-top: 7px; padding-bottom: 5px; }}
-        QPushButton:disabled {{ background-color: #94A3B8; color: #F8FAFC; }}
-        QPushButton:focus {{ border: 2px solid {c['focus_ring']}; }}
-        QPushButton[secondary="true"] {{
-            background-color: {c['neutral-100']};
-            color: {c['neutral-900']};
-        }}
-        QPushButton[secondary="true"]:hover {{ background-color: {c['neutral-200']}; }}
-        QPushButton[secondary="true"]:pressed {{ background-color: #CBD5E1; padding-top: 7px; padding-bottom: 5px; }}
-        QPushButton[success="true"] {{ background-color: {c['success']}; color: white; }}
-        QPushButton[success="true"]:hover {{ background-color: #16A34A; }}
-        QPushButton[success="true"]:pressed {{ background-color: #15803D; padding-top: 7px; padding-bottom: 5px; }}
-        QPushButton[danger="true"] {{ background-color: {c['danger']}; color: white; }}
-        QPushButton[danger="true"]:hover {{ background-color: #DC2626; }}
-        QPushButton[danger="true"]:pressed {{ background-color: #B91C1C; padding-top: 7px; padding-bottom: 5px; }}
-        QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
-            border: 1px solid {c['border']};
-            border-radius: {r['sm']}px;
-            padding: 6px 10px;
-            background-color: {c['input_bg']};
-            min-height: 28px;
-        }}
-        QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-            border-color: {c['focus_ring']};
-            border-width: 2px;
-        }}
-        QFrame[section="true"] {{
-            border: 1px solid {c['border']};
-            border-radius: {r['md']}px;
-            background-color: {c['neutral-50']};
-        }}
-        QFrame[selected="true"] {{
-            border: 3px solid {c['danger']};
-            border-radius: {r['md']}px;
-        }}
-        QFrame[selected="false"] {{
-            border: 3px solid {c['neutral-200']};
-            border-radius: {r['md']}px;
-        }}
-        QScrollBar:vertical {{
-            width: 10px;
-            background: {c['neutral-100']};
-            border-radius: 5px;
-        }}
-        QScrollBar::handle:vertical {{
-            background: {c['text-secondary']};
-            border-radius: 5px;
-            min-height: 30px;
-        }}
-        QScrollBar::handle:vertical:hover {{ background: {c['neutral-900']}; }}
-    """
-
-
-def _apply_design_system(app):
-    app.setStyleSheet(_build_design_qss())
-
-
+# ─── 디자인 토큰은 ui.design_tokens 에서 가져온다 ───
 _PG_HTML_TRANSLATIONS = {
     "Links this axis with another view. When linked, both views will display the same data range.":
         "이 축을 다른 보기와 연결합니다. 연결되면 두 보기가 같은 데이터 범위를 표시합니다.",
@@ -493,12 +363,19 @@ class AudioEditorPanel(QWidget):
         self.sub_lane.changed = self._on_lrc_moved
         self.sub_lane.line_clicked.connect(self.subtitle_clicked.emit)
 
-        # 드래그 중 메인 창 LRC 편집창으로 약 50ms 간격으로 전달한다.
+        # 드래그 중 메인 창 LRC 편집창으로 약 50ms 간격(throttle)으로 전달한다.
+        import time
+        self._lrc_live_last_emit = 0.0
         self._lrc_live_timer = QTimer(self)
         self._lrc_live_timer.setSingleShot(True)
         self._lrc_live_timer.setInterval(50)
         self._lrc_live_timer.timeout.connect(self._emit_lrc_live)
-        self.sub_lane.moved = lambda *_: self._lrc_live_timer.start()
+        def _emit_lrc_live_throttled(*_):
+            now = time.monotonic()
+            if now - self._lrc_live_last_emit >= 0.05:
+                self._lrc_live_last_emit = now
+                self._emit_lrc_live()
+        self.sub_lane.moved = _emit_lrc_live_throttled
         self.plot1.getViewBox().sigXRangeChanged.connect(lambda *_: self.sub_lane.update())
 
         grid.addWidget(self.header1, 0, 0)
@@ -663,7 +540,7 @@ class AudioEditorPanel(QWidget):
     def _setup_plot(self, plot, bg, wave_pen):
         plot.setBackground(bg)
         plot.showGrid(x=True, y=True, alpha=0.25)
-        plot.setMinimumHeight(52)
+        plot.setMinimumHeight(40)
         # 마우스 왼쪽 드래그는 화면 이동(pan)이 아니라 구간 선택에만 쓴다.
         plot.setMouseEnabled(x=False, y=False)
         plot.wave_pen = wave_pen
@@ -1235,6 +1112,15 @@ class AudioEditorPanel(QWidget):
         timeline_total_sec = self._timeline_total_sec or self._play_total_sec
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(position_sec)
+        # 플레이헤드가 화면 밖으로 나가면 파형을 자동으로 따라간다 (auto-pan)
+        try:
+            vb = self.plot1.getViewBox()
+            x_min, x_max = vb.viewRange()[0]
+            if position_sec < x_min or position_sec > x_max:
+                span = x_max - x_min
+                vb.setXRange(position_sec - span * 0.3, position_sec + span * 0.7, padding=0)
+        except Exception:
+            pass
         self._update_subtitles(position_sec)
         # 시간 라벨
         self.time_label.setText(f"{position_sec:.2f} / {timeline_total_sec:.2f}")

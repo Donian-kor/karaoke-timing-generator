@@ -244,14 +244,6 @@ class PreviewSection(QFrame):
         """재생/일시정지 버튼 텍스트를 변경한다."""
         self.btn_play_toggle.setText(text)
 
-    def set_player(self, player) -> None:
-        """QMediaPlayer 인스턴스를 연결한다."""
-        self._player = player
-
-    def player(self):
-        """연결된 QMediaPlayer 인스턴스를 반환한다."""
-        return getattr(self, "_player", None)
-
     def is_slider_down(self) -> bool:
         """슬라이더가 드래그 중인지 반환한다."""
         return self.preview_slider.isSliderDown()

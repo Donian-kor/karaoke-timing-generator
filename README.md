@@ -281,7 +281,14 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 ```
 karaoke-timing-generator/
 ├── karaoke_gui.py          # PySide6 GUI (메인) - 조립/오케스트레이션
-├── audio_editor.py         # 멀티트랙 오디오 편집기
+├── audio_editor/           # 멀티트랙 오디오 편집기 패키지
+│   ├── __init__.py         # AudioEditorPanel, AudioEditorDialog 재노출
+│   ├── panel.py            # AudioEditorPanel (파형 + 재생 + 툴바)
+│   ├── dialog.py           # AudioEditorDialog 팝아웃 래퍼
+│   ├── playback_engine.py  # 트랙 믹스/임시 WAV/단일 QMediaPlayer
+│   ├── waveform.py         # _SelectablePlot
+│   ├── subtitle_lane.py    # _SubtitleLane
+│   └── track_worker.py     # _LoadTrackWorker
 ├── audio_denoise.py        # 파일 스트리밍 잡음 제거 (afftdn / DeepFilterNet)
 ├── stt_server.py           # FastAPI STT 서버 (faster-whisper)
 ├── core/                   # 비즈니스 로직 모듈
