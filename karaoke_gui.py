@@ -845,15 +845,13 @@ class MainWindow(QWidget):
             prev_cursor = QTextCursor(self._last_highlight_block)
             prev_cursor.select(QTextCursor.BlockUnderCursor)
             prev_cursor.mergeCharFormat(QTextCharFormat())
-        # 현재 블록 하이라이트
+        # 현재 블록 하이라이트 (커서/선택 영역은 변경하지 않음)
         cursor = QTextCursor(block)
         cursor.select(QTextCursor.BlockUnderCursor)
         fmt = QTextCharFormat()
         fmt.setBackground(QColor(self._color_state.get("current", "#fbbf24")))
         cursor.mergeCharFormat(fmt)
         self._last_highlight_block = block
-        self.preview.setTextCursor(cursor)
-        self.preview.ensureCursorVisible()
 
     def _clear_preview_highlight(self):
         if self._last_highlight_block is not None and self._last_highlight_block.isValid():
