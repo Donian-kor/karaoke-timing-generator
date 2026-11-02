@@ -388,6 +388,16 @@ class MainWindow(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "오디오 파일 선택", "", "Audio Files (*.wav *.mp3 *.flac *.m4a *.ogg);;All Files (*)")
         if path:
             self.audio_edit.setText(path)
+            # 오디오 파일을 새로 불러오면 이전 곡의 가사/LRC 결과를 초기화한다.
+            self.result = None
+            self._last_enhanced = ""
+            self._last_standard = ""
+            self._lrc_before_edit = ""
+            self.lyrics_edit.clear()
+            self.preview.clear()
+            self.preview_section.clear()
+            if hasattr(self, "status_label"):
+                self.status_label.setText("오디오 파일이 변경되었습니다. 타이밍을 생성하세요.")
 
     def _on_server_toggle(self):
         """서버 시작/중지 토글."""
