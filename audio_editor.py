@@ -11,7 +11,7 @@ import soundfile as sf
 
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer, QSettings
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QColor, QPainter, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
     QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox, QMenuBar,
@@ -362,6 +362,264 @@ class _SelectablePlot(pg.PlotWidget):
             return None
 
 
+class _SubtitleLane(QWidget):
+    """파형 아래에 LRC 자막을 시간축에 맞춰 표시한다.
+
+    위쪽 줄(대사 줄)을 드래그하면 줄 전체 싱크가 이동하고,
+    아래쪽 줄(단어)을 드래그하면 Enhanced LRC의 단어별 싱크가 이동한다.
+    """
+
+    LINE_Y = 2
+    LINE_H = 20
+    WORD_Y = 26
+    WORD_H = 18
+
+    def __init__(self, plot, parent=None):
+        super().__init__(parent)
+        self.plot = plot
+        self.entries = []
+        self.playhead = 0.0
+        self.changed = None
+        self.moved = None
+        self._has_words = False
+        self._drag_kind = None       # "line" / "word"
+        self._drag_index = -1
+        self._drag_word = -1
+        self._drag_x0 = 0.0
+        self._drag_t0 = 0.0
+        self._drag_end = 0.0
+        self._drag_word_starts = []
+        self._hover = None
+        self.setFixedHeight(28)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.ArrowCursor)
+        self.setToolTip(
+            "위쪽 줄: 자막 줄 전체를 좌우로 드래그\n"
+            "아래쪽 줄: 단어별로 좌우 드래그 (Enhanced LRC)"
+        )
+        self.setVisible(False)
+
+    def set_entries(self, entries):
+        self.entries = entries
+        self._has_words = any(e.get("words") for e in entries)
+        self.setFixedHeight(48 if self._has_words else 28)
+        self.setVisible(bool(entries))
+        self.update()
+
+    def set_playhead(self, t):
+        self.playhead = t
+        self.update()
+
+    # ---------- 좌표 변환 ----------
+    def _x_to_time(self, x):
+        try:
+            vb = self.plot.getViewBox()
+            scene_pt = self.plot.mapToScene(int(x), 0)
+            return float(vb.mapSceneToView(scene_pt).x())
+        except Exception:
+            return 0.0
+
+    def _time_to_x(self, t):
+        try:
+            vb = self.plot.getViewBox()
+            scene_pt = vb.mapViewToScene(QtCore.QPointF(float(t), 0.0))
+            return float(self.plot.mapFromScene(scene_pt).x())
+        except Exception:
+            return 0.0
+
+    def _line_at(self, t):
+        for i, e in enumerate(self.entries):
+            if e["start"] <= t < e["end"]:
+                return i
+        return -1
+
+    def _word_at(self, i, t):
+        words = self.entries[i].get("words") or []
+        for j, w in enumerate(words):
+            end = words[j + 1]["start"] if j + 1 < len(words) else self.entries[i]["end"]
+            if w["start"] <= t < end:
+                return j
+        return -1
+
+    # ---------- 그리기 ----------
+    def _paint_block(self, p, fm, start, end, y, h, text,
+                     active=False, dragging=False, word=False):
+        x1 = self._time_to_x(start)
+        x2 = self._time_to_x(end)
+        if x2 < 0 or x1 > self.width():
+            return
+        left = max(0.0, x1)
+        right = min(float(self.width()) - 1.0, x2)
+        if word:
+            right -= 1.0
+        if right - left < 2.0:
+            right = left + 2.0
+        rect = QtCore.QRectF(left, float(y), right - left, float(h))
+        if dragging:
+            p.fillRect(rect, QColor("#f59e0b"))
+            p.setPen(QColor("#0f172a"))
+        elif active:
+            p.fillRect(rect, QColor("#fbbf24"))
+            p.setPen(QColor("#0f172a"))
+        elif word:
+            p.fillRect(rect, QColor("#334155"))
+            p.setPen(QColor("#e2e8f0"))
+        else:
+            p.fillRect(rect, QColor("#1e293b"))
+            p.setPen(QColor("#cbd5e1"))
+        if rect.width() > 8:
+            shown = fm.elidedText(text, Qt.ElideRight, int(rect.width()) - 6)
+            p.drawText(rect.adjusted(3.0, 0.0, -3.0, 0.0),
+                       Qt.AlignVCenter | Qt.AlignLeft, shown)
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0f172a"))
+        font = QFont()
+        font.setPointSize(9)
+        p.setFont(font)
+        fm = QFontMetrics(font)
+
+        # 대사 줄
+        for i, e in enumerate(self.entries):
+            active = e["start"] <= self.playhead < e["end"]
+            self._paint_block(
+                p, fm, e["start"], e["end"],
+                self.LINE_Y, self.LINE_H, e["text"],
+                active=active,
+                dragging=(self._drag_kind == "line" and self._drag_index == i),
+            )
+
+        # 단어 줄
+        if self._has_words:
+            for i, e in enumerate(self.entries):
+                words = e.get("words") or []
+                for j, w in enumerate(words):
+                    end = words[j + 1]["start"] if j + 1 < len(words) else e["end"]
+                    active = w["start"] <= self.playhead < end
+                    self._paint_block(
+                        p, fm, w["start"], end,
+                        self.WORD_Y, self.WORD_H, w["text"],
+                        active=active,
+                        dragging=(self._drag_kind == "word"
+                                  and self._drag_index == i
+                                  and self._drag_word == j),
+                        word=True,
+                    )
+        p.end()
+
+    # ---------- 마우스 ----------
+    def mousePressEvent(self, ev):
+        if ev.button() != Qt.LeftButton:
+            return super().mousePressEvent(ev)
+        pos = ev.position()
+        t = self._x_to_time(pos.x())
+
+        if self._has_words and pos.y() >= self.WORD_Y - 2 and pos.y() <= self.WORD_Y + self.WORD_H + 2:
+            i = self._line_at(t)
+            if i < 0:
+                return super().mousePressEvent(ev)
+            j = self._word_at(i, t)
+            if j < 0:
+                return super().mousePressEvent(ev)
+            self._drag_kind = "word"
+            self._drag_index = i
+            self._drag_word = j
+            self._drag_x0 = pos.x()
+            self._drag_t0 = self.entries[i]["words"][j]["start"]
+            self.setCursor(Qt.ClosedHandCursor)
+            self.update()
+            ev.accept()
+            return
+
+        i = self._line_at(t)
+        if i < 0:
+            return super().mousePressEvent(ev)
+        self._drag_kind = "line"
+        self._drag_index = i
+        self._drag_word = -1
+        self._drag_x0 = pos.x()
+        self._drag_t0 = self.entries[i]["start"]
+        self._drag_end = self.entries[i]["end"]
+        self._drag_word_starts = [w["start"] for w in (self.entries[i].get("words") or [])]
+        self.setCursor(Qt.ClosedHandCursor)
+        self.update()
+        ev.accept()
+
+    def mouseMoveEvent(self, ev):
+        pos = ev.position()
+        x = pos.x()
+        if self._drag_kind == "line":
+            e = self.entries[self._drag_index]
+            dt = self._x_to_time(x) - self._x_to_time(self._drag_x0)
+            dur = self._drag_end - self._drag_t0
+            start = max(0.0, self._drag_t0 + dt)
+            e["start"] = start
+            e["end"] = start + dur
+            for w, ws in zip(e.get("words") or [], self._drag_word_starts):
+                w["start"] = max(0.0, ws + dt)
+            self.update()
+            if callable(self.moved):
+                self.moved(self._drag_index, -1)
+            ev.accept()
+            return
+
+        if self._drag_kind == "word":
+            e = self.entries[self._drag_index]
+            words = e.get("words") or []
+            j = self._drag_word
+            if not (0 <= j < len(words)):
+                return
+            lo = 0.0 if j == 0 else words[j - 1]["start"] + 0.01
+            hi = (words[j + 1]["start"] if j + 1 < len(words) else e["end"]) - 0.01
+            if hi < lo:
+                hi = lo
+            dt = self._x_to_time(x) - self._x_to_time(self._drag_x0)
+            new_start = min(max(lo, self._drag_t0 + dt), hi)
+            words[j]["start"] = new_start
+            if j == 0:
+                e["start"] = new_start
+            self.update()
+            if callable(self.moved):
+                self.moved(self._drag_index, j)
+            ev.accept()
+            return
+
+        # 커서 모양
+        t = self._x_to_time(x)
+        hover = None
+        if self._has_words and self.WORD_Y - 2 <= pos.y() <= self.WORD_Y + self.WORD_H + 2:
+            i = self._line_at(t)
+            if i >= 0:
+                j = self._word_at(i, t)
+                if j >= 0:
+                    hover = ("word", i, j)
+        if hover is None:
+            i = self._line_at(t)
+            if i >= 0:
+                hover = ("line", i, -1)
+        if hover != self._hover:
+            self._hover = hover
+            self.setCursor(Qt.OpenHandCursor if hover else Qt.ArrowCursor)
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if self._drag_kind:
+            kind = self._drag_kind
+            i = self._drag_index
+            j = self._drag_word
+            self._drag_kind = None
+            self._drag_index = -1
+            self._drag_word = -1
+            self.setCursor(Qt.OpenHandCursor)
+            self.update()
+            if callable(self.changed):
+                self.changed(i, j if kind == "word" else -1)
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
+
+
 class AudioEditorDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -392,11 +650,8 @@ class AudioEditorDialog(QDialog):
         self._play_track = 1      # 재생 시작점을 가져올 트랙 (1/2/3)
 
         # LRC 자막 데이터
-        self.lrc_entries = []     # [(start, end, text), ...]
-        self.lrc_offset = 0.0     # 드래그로 조정된 전역 오프셋 (초)
-        self._lrc_dragging = False
-        self._lrc_drag_start_x = 0
-        self._lrc_drag_start_offset = 0.0
+        self.lrc_entries = []     # [{"start":초, "end":초, "text":자막}, ...]
+        self.lrc_live_callback = None   # 드래그 중 메인 창 LRC 갱신용 콜백
         self._sel_track = 1       # 현재 드래그 중인 트랙
         self._clipboard = None    # 구간 복사/붙여넣기 클립보드
         self._loop_mode = False   # 선택 구간 반복 재생 모드
@@ -578,36 +833,17 @@ class AudioEditorDialog(QDialog):
         for w in (self.mute1, self.mute2, self.solo1, self.solo2):
             w.toggled.connect(lambda _: self._apply_live_mix())
 
-        # 자막 표시 라벨 (파형 아래)
-        self.sub1 = QLabel("")
-        self.sub1.setAlignment(Qt.AlignCenter)
-        self.sub1.setStyleSheet("QLabel { background-color: #1e293b; color: #fbbf24; font-size: 13px; font-weight: bold; padding: 4px; border: none; }")
-        self.sub1.setAttribute(Qt.WA_StyledBackground, True)
-        self.sub1.setAutoFillBackground(True)
-        self.sub1.setMinimumHeight(24)
-        self.sub1.mousePressEvent = lambda e: self._lrc_sub_press(e, 1)
-        self.sub1.mouseMoveEvent = lambda e: self._lrc_sub_move(e, 1)
-        self.sub1.mouseReleaseEvent = lambda e: self._lrc_sub_release(e, 1)
+        # 파형 아래 자막 레인 (LRC를 불러오면 표시)
+        self.sub_lane = _SubtitleLane(self.plot1)
+        self.sub_lane.changed = self._on_lrc_moved
 
-        self.sub2 = QLabel("")
-        self.sub2.setAlignment(Qt.AlignCenter)
-        self.sub2.setStyleSheet("QLabel { background-color: #1e293b; color: #fbbf24; font-size: 13px; font-weight: bold; padding: 4px; border: none; }")
-        self.sub2.setAttribute(Qt.WA_StyledBackground, True)
-        self.sub2.setAutoFillBackground(True)
-        self.sub2.setMinimumHeight(24)
-        self.sub2.mousePressEvent = lambda e: self._lrc_sub_press(e, 2)
-        self.sub2.mouseMoveEvent = lambda e: self._lrc_sub_move(e, 2)
-        self.sub2.mouseReleaseEvent = lambda e: self._lrc_sub_release(e, 2)
-
-        self.sub3 = QLabel("")
-        self.sub3.setAlignment(Qt.AlignCenter)
-        self.sub3.setStyleSheet("QLabel { background-color: #1e293b; color: #fbbf24; font-size: 13px; font-weight: bold; padding: 4px; border: none; }")
-        self.sub3.setAttribute(Qt.WA_StyledBackground, True)
-        self.sub3.setAutoFillBackground(True)
-        self.sub3.setMinimumHeight(24)
-        self.sub3.mousePressEvent = lambda e: self._lrc_sub_press(e, 3)
-        self.sub3.mouseMoveEvent = lambda e: self._lrc_sub_move(e, 3)
-        self.sub3.mouseReleaseEvent = lambda e: self._lrc_sub_release(e, 3)
+        # 드래그 중 메인 창 LRC 편집창으로 약 50ms 간격으로 전달한다.
+        self._lrc_live_timer = QTimer(self)
+        self._lrc_live_timer.setSingleShot(True)
+        self._lrc_live_timer.setInterval(50)
+        self._lrc_live_timer.timeout.connect(self._emit_lrc_live)
+        self.sub_lane.moved = lambda *_: self._lrc_live_timer.start()
+        self.plot1.getViewBox().sigXRangeChanged.connect(lambda *_: self.sub_lane.update())
 
         grid.addWidget(self.header1, 0, 0)
         _c0 = QWidget()
@@ -615,24 +851,12 @@ class AudioEditorDialog(QDialog):
         _v0.setContentsMargins(0, 0, 0, 0)
         _v0.setSpacing(2)
         _v0.addWidget(self.plot1, 1)
-        _v0.addWidget(self.sub1, 0)
+        _v0.addWidget(self.sub_lane, 0)
         grid.addWidget(_c0, 0, 1)
         grid.addWidget(self.header2, 1, 0)
-        _c1 = QWidget()
-        _v1 = QVBoxLayout(_c1)
-        _v1.setContentsMargins(0, 0, 0, 0)
-        _v1.setSpacing(2)
-        _v1.addWidget(self.plot2, 1)
-        _v1.addWidget(self.sub2, 0)
-        grid.addWidget(_c1, 1, 1)
+        grid.addWidget(self.plot2, 1, 1)
         grid.addWidget(self.header3, 2, 0)
-        _c2 = QWidget()
-        _v2 = QVBoxLayout(_c2)
-        _v2.setContentsMargins(0, 0, 0, 0)
-        _v2.setSpacing(2)
-        _v2.addWidget(self.plot3, 1)
-        _v2.addWidget(self.sub3, 0)
-        grid.addWidget(_c2, 2, 1)
+        grid.addWidget(self.plot3, 2, 1)
         grid.setRowStretch(0, 1)
         grid.setRowStretch(1, 1)
         grid.setRowStretch(2, 0)
@@ -1197,126 +1421,148 @@ class AudioEditorDialog(QDialog):
             pos = self._player.position() / 1000.0
             self.play_current(start_sec=pos)
 
+    @staticmethod
+    def _parse_ts(mm, ss, frac_s):
+        frac = 0.0
+        if frac_s:
+            frac = int(frac_s) / (1000.0 if len(frac_s) >= 3 else 100.0)
+        return int(mm) * 60 + int(ss) + frac
+
     def _parse_lrc(self, text):
-        """LRC 텍스트를 (start, end, text) 리스트로 파싱한다."""
+        """LRC/Enhanced LRC를 줄/단어 시간 정보가 담긴 목록으로 파싱한다."""
         import re
-        entries = []
-        lines = text.splitlines()
-        times = []
-        for raw in lines:
-            m = re.match(r"\s*\[(\d+):(\d+)(?:\.(\d+))?\](.*)", raw)
+        lines = []
+        for raw in text.splitlines():
+            m = re.match(r"\s*\[(\d+):(\d+)(?:[.:](\d+))?\](.*)", raw)
             if not m:
                 continue
-            mm, ss, cc, lyric = m.groups()
-            frac = 0.0
-            if cc:
-                if len(cc) >= 3:
-                    frac = int(cc) / 1000.0
-                else:
-                    frac = int(cc) / 100.0
-            t = int(mm) * 60 + int(ss) + frac
-            times.append((t, lyric.strip()))
-        # compute end times
-        for i, (t, lyric) in enumerate(times):
-            if i + 1 < len(times):
-                end = times[i+1][0]
-            else:
-                end = t + 5.0
-            if lyric:
-                entries.append((t, end, lyric))
+            mm, ss, frac_s, rest = m.groups()
+            line_start = self._parse_ts(mm, ss, frac_s)
+
+            words = []
+            word_re = re.compile(
+                r"<(\d+):(\d+)(?:[.:](\d+))?>(.*?)(?=<\d+:\d+(?:[.:]\d+)?>|$)")
+            for wm in word_re.finditer(rest):
+                wmm, wss, wfrac, wtext = wm.groups()
+                wtext = re.sub(r"\s+", " ", wtext).strip()
+                if wtext:
+                    words.append({
+                        "start": self._parse_ts(wmm, wss, wfrac),
+                        "text": wtext,
+                    })
+
+            lyric = re.sub(r"<\d+:\d+(?:[.:]\d+)?>", " ", rest)
+            lyric = re.sub(r"\s+", " ", lyric).strip()
+            if not lyric:
+                continue
+            lines.append({"start": line_start, "text": lyric, "words": words})
+
+        entries = []
+        for i, item in enumerate(lines):
+            end = lines[i + 1]["start"] if i + 1 < len(lines) else item["start"] + 5.0
+            if end <= item["start"]:
+                end = item["start"] + 0.5
+            entries.append({
+                "start": item["start"],
+                "end": end,
+                "text": item["text"],
+                "words": item["words"],
+            })
         return entries
 
+    def set_lrc_text(self, text):
+        """메인 창에서 넘겨준 LRC 텍스트를 자막 레인에 표시한다."""
+        self._set_lrc_entries(self._parse_lrc(text))
+
+    def _set_lrc_entries(self, entries):
+        self.lrc_entries = entries
+        if hasattr(self, "sub_lane"):
+            self.sub_lane.set_entries(entries)
+            self._update_subtitles()
+
     def load_lrc(self):
-        from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self, "LRC 파일 불러오기", "", "LRC Files (*.lrc);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "LRC 파일 불러오기", "", "LRC Files (*.lrc);;All Files (*)")
         if not path:
             return
         try:
             with open(path, encoding="utf-8") as f:
                 text = f.read()
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "오류", f"LRC 파일을 읽을 수 없습니다:\n{e}")
             return
-        self.lrc_entries = self._parse_lrc(text)
-        self.lrc_offset = 0.0
-        self._update_subtitles()
+        self._set_lrc_entries(self._parse_lrc(text))
         self.status.setText(f"LRC 로드: {len(self.lrc_entries)}개 자막")
 
+    @staticmethod
+    def _fmt_lrc_ts(sec):
+        sec = max(0.0, sec)
+        mm = int(sec // 60)
+        ss = int(sec % 60)
+        cs = int(round((sec % 1) * 100))
+        if cs >= 100:
+            cs = 99
+        return f"{mm:02d}:{ss:02d}.{cs:02d}"
+
+    def _build_lrc_text(self):
+        """현재 줄/단어 시간을 LRC 텍스트로 만든다."""
+        out = []
+        for e in self.lrc_entries:
+            line_ts = self._fmt_lrc_ts(e["start"])
+            words = e.get("words") or []
+            if words:
+                body = "".join(
+                    f"<{self._fmt_lrc_ts(w['start'])}>{w['text']} " for w in words
+                )
+                out.append(f"[{line_ts}]{body}".rstrip())
+            else:
+                out.append(f"[{line_ts}]{e['text']}")
+        return "\n".join(out) + ("\n" if out else "")
+
+    def _emit_lrc_live(self):
+        """드래그 중 바뀐 LRC를 메인 창에 실시간으로 넘긴다."""
+        if not callable(self.lrc_live_callback):
+            return
+        text = self._build_lrc_text()
+        if text:
+            self.lrc_live_callback(text)
+
     def save_lrc(self):
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
         if not self.lrc_entries:
             QMessageBox.information(self, "정보", "저장할 LRC가 없습니다.")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "LRC 파일 저장", "", "LRC Files (*.lrc);;All Files (*)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "LRC 파일 저장", "", "LRC Files (*.lrc);;All Files (*)")
         if not path:
             return
-        lines = []
-        for start, end, text in self.lrc_entries:
-            s = start + self.lrc_offset
-            if s < 0:
-                s = 0.0
-            mm = int(s // 60)
-            ss = int(s % 60)
-            cs = int(round((s % 1) * 100))
-            if cs >= 100:
-                cs = 99
-            lines.append(f"[{mm:02d}:{ss:02d}.{cs:02d}]{text}")
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
+                f.write(self._build_lrc_text())
             QMessageBox.information(self, "완료", f"LRC가 저장되었습니다:\n{path}")
         except Exception as e:
             QMessageBox.warning(self, "오류", f"저장 실패:\n{e}")
 
-    def _current_lrc_text(self, t):
-        """시간 t에 해당하는 자막 텍스트를 반환한다."""
-        for start, end, text in self.lrc_entries:
-            if start + self.lrc_offset <= t < end + self.lrc_offset:
-                return text
-        return ""
-
     def _update_subtitles(self):
-        """현재 재생 위치에 맞는 자막을 각 트랙의 자막 라벨에 표시한다."""
+        """현재 재생 위치를 자막 레인에 반영한다."""
+        if not hasattr(self, "sub_lane"):
+            return
         t = 0.0
         if self._player is not None:
             t = self._player.position() / 1000.0
-        text = self._current_lrc_text(t)
-        for sub in (self.sub1, self.sub2, self.sub3):
-            sub.setText(text if text else "")
+        self.sub_lane.set_playhead(t)
 
-    def _lrc_sub_press(self, event, track):
-        if not self.lrc_entries:
+    def _on_lrc_moved(self, index, word_index=-1):
+        """자막 줄/단어를 드래그해 시간이 바뀌면 상태 표시줄에 알린다."""
+        if not (0 <= index < len(self.lrc_entries)):
             return
-        self._lrc_dragging = True
-        self._lrc_drag_start_x = event.position().x() if hasattr(event, "position") else event.x()
-        self._lrc_drag_start_offset = self.lrc_offset
-        # use the plot for track to map
-        self._lrc_drag_track = track
-        event.accept()
-
-    def _lrc_sub_move(self, event, track):
-        if not self._lrc_dragging:
-            return
-        plot = {1: self.plot1, 2: self.plot2, 3: self.plot3}.get(track, self.plot1)
-        x = event.position().x() if hasattr(event, "position") else event.x()
-        # map pixel delta to time delta using plot view range
-        try:
-            view = plot.viewRange()[0]
-            vb = plot.getViewBox()
-            p0 = vb.mapToView(QtCore.QPointF(self._lrc_drag_start_x, 0)).x()
-            p1 = vb.mapToView(QtCore.QPointF(x, 0)).x()
-            delta = p1 - p0
-        except Exception:
-            delta = 0.0
-        self.lrc_offset = self._lrc_drag_start_offset + delta
-        self._update_subtitles()
-        # update status
-        self.status.setText(f"LRC 오프셋: {self.lrc_offset:+.2f}초")
-
-    def _lrc_sub_release(self, event, track):
-        self._lrc_dragging = False
-        self.status.setText(f"LRC 오프셋 적용: {self.lrc_offset:+.2f}초")
+        e = self.lrc_entries[index]
+        words = e.get("words") or []
+        if 0 <= word_index < len(words):
+            w = words[word_index]
+            self.status.setText(f"단어 이동: {w['start']:.2f}초  {w['text']}")
+        else:
+            self.status.setText(f"자막 줄 이동: {e['start']:.2f}초  {e['text']}")
+        self._emit_lrc_live()
 
     def _on_position_changed(self, pos_ms):
         if self._play_total_sec <= 0:

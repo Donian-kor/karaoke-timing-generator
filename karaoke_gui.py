@@ -772,6 +772,10 @@ class MainWindow(QWidget):
             QMessageBox.critical(self, "오류", f"오디오 편집 모듈을 불러올 수 없습니다:\n{e}")
             return
         dlg = AudioEditorDialog(self)
+        dlg.lrc_live_callback = self._apply_lrc_from_editor
+        lrc_text = self.preview.toPlainText().strip()
+        if lrc_text:
+            dlg.set_lrc_text(lrc_text)
         audio_path = self.audio_edit.text().strip()
         if audio_path and os.path.exists(audio_path):
             dlg.open_track(1, audio_path)
@@ -798,6 +802,14 @@ class MainWindow(QWidget):
             self._preview_timer = QTimer(self)
             self._preview_timer.setInterval(100)
             self._preview_timer.timeout.connect(self._update_preview_lyric)
+
+    def _apply_lrc_from_editor(self, text):
+        """오디오 편집기에서 자막을 드래그하는 동안 LRC 편집창을 실시간 갱신한다."""
+        if not text or text == self.preview.toPlainText():
+            return
+        scroll = self.preview.verticalScrollBar().value()
+        self.preview.setPlainText(text)
+        self.preview.verticalScrollBar().setValue(scroll)
 
     def _refresh_preview_parsed(self):
         """LRC 편집 내용이 변경되면 재생 파싱 결과를 갱신한다."""
