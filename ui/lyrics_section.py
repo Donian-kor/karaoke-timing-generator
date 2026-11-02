@@ -145,7 +145,7 @@ class LyricsSection(QFrame):
             "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
         btns_layout.addWidget(self.line_offset_spin)
 
-        self.btn_line_offset = QPushButton("현재 줄 적용")
+        self.btn_line_offset = QPushButton("선택 줄 맞춤")
         self.btn_line_offset.setToolTip(
             "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
         self.btn_line_offset.clicked.connect(lambda: self.line_offset_clicked.emit())
@@ -163,7 +163,7 @@ class LyricsSection(QFrame):
             "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
         btns_layout.addWidget(self.offset_spin)
 
-        self.btn_offset = QPushButton("적용")
+        self.btn_offset = QPushButton("전체 줄 맞춤")
         self.btn_offset.clicked.connect(lambda: self.offset_clicked.emit())
         self.btn_offset.setProperty("secondary", True)
         btns_layout.addWidget(self.btn_offset)
