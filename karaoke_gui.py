@@ -53,14 +53,14 @@ def _quiet_ffmpeg_noise():
 _quiet_ffmpeg_noise()
 
 import requests
-from PySide6.QtCore import QThread, Signal, Qt, QTimer, QUrl, QEvent, QRegularExpression
+from PySide6.QtCore import QThread, Signal, Qt, QTimer, QEvent, QRegularExpression
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QMessageBox,
     QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame, QMenuBar,
 )
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from audio_editor import AudioEditorPanel
 
 ACE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ACE-Step Studio", "data")
 ACE_MEDIA_DIR = os.path.join(ACE_DATA_DIR, "media")
@@ -71,19 +71,18 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("로컬 노래방 타이밍 생성기 (stable-ts)")
-        self.resize(1000, 600)
+        self.resize(1280, 840)
         self.server_proc = None
         self.worker = None
         self.result = None
         self._pending_generate = False
         self._last_standard = ""
         self._last_enhanced = ""
-        self._player = None
-        self._audio_output = None
-        self._preview_timer = None
+        self._pending_preview_path = None
         self._settings = self._load_settings()
         self._preview_parsed = []
         self._slider_dragging = False
+        self._is_syncing = False
         self._last_highlight_block = None
         self._lrc_before_edit = ""
         self._color_state = self._settings.get("colors", {"current": "#fbbf24", "past": "#6b7280", "future": "#ffffff"})
@@ -109,6 +108,9 @@ class MainWindow(QWidget):
                 "language": self.lang_combo.currentData(),
                 "colors": dict(self._color_state),
                 "font_sizes": dict(self._font_sizes),
+                "window_size": [self.width(), self.height()],
+                "splitter_sizes": self.vsplitter.sizes(),
+                "settings_collapsed": self.settings_section.is_collapsed(),
             }
             with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -158,6 +160,12 @@ class MainWindow(QWidget):
                 idx = self.lang_combo.findData(self._settings["language"])
                 if idx >= 0:
                     self.lang_combo.setCurrentIndex(idx)
+            window_size = self._settings.get("window_size")
+            if isinstance(window_size, list) and len(window_size) == 2:
+                self.resize(*window_size)
+            splitter_sizes = self._settings.get("splitter_sizes")
+            if isinstance(splitter_sizes, list) and len(splitter_sizes) == 3:
+                self.vsplitter.setSizes(splitter_sizes)
         except Exception:
             pass
 
@@ -168,6 +176,68 @@ class MainWindow(QWidget):
 
         # ── 메뉴바 ──
         menubar = QMenuBar(self)
+        self.menu_bar = menubar
+
+        file_menu = menubar.addMenu("파일(&F)")
+        file_menu.addAction("오디오 열기", self.browse_audio)
+        file_menu.addAction(
+            "보컬 열기", lambda: self.audio_editor_panel.open_track(2)
+        )
+        file_menu.addSeparator()
+        file_menu.addAction("반주 저장", self._panel_action("save_track", 1))
+        file_menu.addAction("보컬 저장", self._panel_action("save_track", 2))
+        file_menu.addAction(
+            "두 트랙 따로 저장", self._panel_action("save_both_tracks")
+        )
+        file_menu.addAction("믹스 저장", self._panel_action("save_result"))
+        file_menu.addSeparator()
+        file_menu.addAction("LRC 불러오기", self._panel_action("load_lrc"))
+        file_menu.addAction("LRC 저장", self._panel_action("save_lrc"))
+        file_menu.addSeparator()
+        file_menu.addAction("종료", self.close)
+
+        edit_menu = menubar.addMenu("편집(&E)")
+        edit_menu.addAction(
+            "복사", self._panel_action("copy_selection")
+        )
+        edit_menu.addAction(
+            "붙여넣기", self._panel_action("paste_clipboard")
+        )
+        edit_menu.addAction(
+            "잘라내기", self._panel_action("trim_delete")
+        )
+        edit_menu.addAction(
+            "선택 구간 음소거", self._panel_action("delete_selection_silence")
+        )
+        edit_menu.addAction("되돌리기", self._panel_action("undo"))
+
+        view_menu = menubar.addMenu("보기(&V)")
+        self.action_link_tracks = view_menu.addAction("두 트랙 함께 선택")
+        self.action_link_tracks.setCheckable(True)
+
+        tools_menu = menubar.addMenu("도구(&T)")
+        tools_menu.addAction(
+            "선택 구간만 남기기", self._panel_action("trim_keep")
+        )
+        tools_menu.addAction(
+            "선택 구간 내보내기", self._panel_action("trim_export_selected")
+        )
+        tools_menu.addAction(
+            "정규화", self._panel_action("normalize_track")
+        )
+        tools_menu.addAction(
+            "페이드 인/아웃", self._panel_action("fade_in_out")
+        )
+        tools_menu.addAction(
+            "선택 구간 반복 재생", self._panel_action("loop_play")
+        )
+        tools_menu.addAction(
+            "믹싱 미리보기", self._panel_action("mix_tracks")
+        )
+        tools_menu.addAction(
+            "파일 잡음 제거", self._panel_action("open_denoise_dialog")
+        )
+
         help_menu = menubar.addMenu("도움말(&H)")
         act_help = help_menu.addAction("사용 방법")
         act_help.setShortcut("F1")
@@ -179,8 +249,8 @@ class MainWindow(QWidget):
         )
         main_layout.addWidget(menubar)
 
-        main_layout.setContentsMargins(4, 8, 4, 12)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(4)
 
         # 설정 섹션 (SettingsSection 위젯)
         self.settings_section = SettingsSection()
@@ -215,6 +285,7 @@ class MainWindow(QWidget):
         self.lyrics_edit = self.lyrics_section.lyrics_edit
         self.preview = self.lyrics_section.preview
         self.preview.textChanged.connect(self._refresh_preview_parsed)
+        self.preview.viewport().installEventFilter(self)
         self.btn_apply = self.lyrics_section.btn_apply
         self.btn_compare = self.lyrics_section.btn_compare
         self.btn_revert = self.lyrics_section.btn_revert
@@ -242,6 +313,7 @@ class MainWindow(QWidget):
 
         # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
         self.preview_section = PreviewSection()
+        self.preview_section.set_compact_mode()
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
         self.preview_lyric_label = self.preview_section.preview_lyric_label
         self.preview_time_label = self.preview_section.preview_time_label
@@ -259,19 +331,67 @@ class MainWindow(QWidget):
         self.preview_slider.sliderReleased.connect(self._on_slider_released)
         self.preview_section.speed_changed.connect(self._on_speed_changed)
         self.preview_section.color_changed.connect(self._on_color_changed)
-        self.preview_section.collapsed_changed.connect(self._on_preview_collapsed)
 
+        self.audio_editor_panel = AudioEditorPanel(self)
+        self.audio_editor_panel.set_compact_mode()
+        self.action_link_tracks.setChecked(
+            self.audio_editor_panel.chk_link_selection.isChecked()
+        )
+        self.action_link_tracks.toggled.connect(
+            self.audio_editor_panel.chk_link_selection.setChecked
+        )
+        self.audio_editor_panel.chk_link_selection.toggled.connect(
+            self.action_link_tracks.setChecked
+        )
+        self.audio_editor_panel.position_changed.connect(self._on_integrated_position_changed)
+        self.audio_editor_panel.lrc_updated.connect(self._apply_lrc_from_editor)
+        self.audio_editor_panel.track_loaded.connect(self._on_audio_track_loaded)
+        self.audio_editor_panel.track_load_failed.connect(self._on_audio_track_load_failed)
+        self.audio_editor_panel.subtitle_clicked.connect(self._on_subtitle_clicked)
+        self.audio_editor_panel.playback_state_changed.connect(lambda _: self._update_play_btn())
+        self.audio_edit.textChanged.connect(self._on_audio_path_changed)
 
-        # ── 배치: 설정 → 미리보기 → 가사/LRC ─────────────────────
+        self.audio_workspace = QFrame(self)
+        self.audio_workspace.setProperty("section", True)
+        workspace_layout = QVBoxLayout(self.audio_workspace)
+        workspace_layout.setContentsMargins(6, 4, 6, 4)
+        workspace_layout.setSpacing(2)
+        workspace_toolbar = QHBoxLayout()
+        workspace_toolbar.setContentsMargins(4, 0, 4, 0)
+        workspace_toolbar.setSpacing(6)
+        workspace_toolbar.addWidget(
+            self.settings_section.take_audio_browse_button()
+        )
+        workspace_toolbar.addWidget(
+            self.audio_editor_panel.take_vocal_open_button()
+        )
+        self.preview_section.move_controls_to(workspace_toolbar)
+        workspace_layout.addLayout(workspace_toolbar)
+
+        offset_toolbar = QHBoxLayout()
+        offset_toolbar.setContentsMargins(4, 0, 4, 0)
+        offset_toolbar.setSpacing(6)
+        offset_toolbar.addWidget(QLabel("싱크:"))
+        self.lyrics_section.move_offset_controls_to(offset_toolbar)
+        offset_toolbar.addStretch(1)
+        workspace_layout.addLayout(offset_toolbar)
+
+        workspace_layout.addWidget(self.preview_section)
+        workspace_layout.addWidget(self.audio_editor_panel, 1)
+
+        # ── 배치: 설정 → 미리보기/파형 작업영역 → 가사/LRC ────────────
         self.vsplitter = QSplitter(Qt.Vertical)
         self.vsplitter.addWidget(self.settings_section)
-        self.vsplitter.addWidget(self.preview_section)
+        self.vsplitter.addWidget(self.audio_workspace)
         self.vsplitter.addWidget(self.lyrics_section)
-        self.vsplitter.setSizes([180, 250, 320])
+        self.vsplitter.setSizes([40, 470, 190])
         self.vsplitter.setStretchFactor(0, 0)
-        self.vsplitter.setStretchFactor(1, 1)
-        self.vsplitter.setStretchFactor(2, 1)
+        self.vsplitter.setStretchFactor(1, 3)
+        self.vsplitter.setStretchFactor(2, 2)
         main_layout.addWidget(self.vsplitter, 1)
+        self.settings_section.set_collapsed(
+            self._settings.get("settings_collapsed", True)
+        )
 
         self._update_compute_combo()
         self.status_label = QLabel("")
@@ -282,23 +402,19 @@ class MainWindow(QWidget):
         self._health_worker.finished.connect(self._on_health_checked)
         self._health_worker.start()
 
+    def _panel_action(self, method_name, *args):
+        return lambda: getattr(self.audio_editor_panel, method_name)(*args)
+
     def _on_settings_collapsed(self, collapsed):
         """설정 섹션 접기/펼치기 시 스플리터 크기를 조정한다."""
         if collapsed:
-            self.vsplitter.setSizes([40, 280, 280])
+            self.vsplitter.setSizes([40, 470, 190])
         else:
             saved = getattr(self.settings_section, '_saved_sizes', None)
-            if saved:
+            if saved and len(saved) == 3:
                 self.vsplitter.setSizes(saved)
             else:
-                self.vsplitter.setSizes([180, 250, 320])
-
-    def _on_preview_collapsed(self, collapsed):
-        """재생 미리보기 섹션 접기/펼치기 시 스플리터 크기를 조정한다."""
-        if collapsed:
-            self.vsplitter.setSizes([180, 65, 320])
-        else:
-            self.vsplitter.setSizes([180, 250, 320])
+                self.vsplitter.setSizes([100, 470, 190])
 
     def _on_health_checked(self, ok, model, compute_type):
         if ok:
@@ -766,20 +882,10 @@ class MainWindow(QWidget):
             QMessageBox.information(self, "정보", "복원할 생성 결과가 없습니다.")
 
     def open_audio_editor(self):
-        try:
-            from audio_editor import AudioEditorDialog
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"오디오 편집 모듈을 불러올 수 없습니다:\n{e}")
-            return
-        dlg = AudioEditorDialog(self)
-        dlg.lrc_live_callback = self._apply_lrc_from_editor
-        lrc_text = self.preview.toPlainText().strip()
-        if lrc_text:
-            dlg.set_lrc_text(lrc_text)
         audio_path = self.audio_edit.text().strip()
-        if audio_path and os.path.exists(audio_path):
-            dlg.open_track(1, audio_path)
-        dlg.exec()
+        self.audio_editor_panel.set_lrc_text(self.preview.toPlainText().strip())
+        self._on_audio_path_changed(audio_path)
+        self.vsplitter.setSizes([self.settings_section.height(), 470, 190])
 
     def open_denoise(self):
         """파일 전체를 스트리밍으로 처리하는 잡음 제거 창을 연다."""
@@ -794,21 +900,66 @@ class MainWindow(QWidget):
             dlg.set_input_path(audio_path)
         dlg.exec()
 
-    def _ensure_player(self):
-        if self._player is None:
-            self._player = QMediaPlayer()
-            self._audio_output = QAudioOutput()
-            self._player.setAudioOutput(self._audio_output)
-            self._preview_timer = QTimer(self)
-            self._preview_timer.setInterval(100)
-            self._preview_timer.timeout.connect(self._update_preview_lyric)
+    def _on_audio_path_changed(self, path):
+        path = path.strip()
+        if not path or not os.path.isfile(path):
+            return
+        if self.audio_editor_panel.path1 == path:
+            return
+        self._pending_preview_path = None
+        self.audio_editor_panel.stop_playback()
+        self.audio_editor_panel.open_track(1, path)
+
+    def _on_audio_track_loaded(self, which, path):
+        if which == 1 and self._pending_preview_path == path:
+            self._pending_preview_path = None
+            self.audio_editor_panel.play_current()
+
+    def _on_audio_track_load_failed(self, which, path):
+        if which == 1:
+            self._pending_preview_path = None
+
+    def _on_integrated_position_changed(self, position_sec, total_sec):
+        self._update_preview_lyric(position_sec, total_sec)
+
+    def _on_lrc_line_clicked(self, line_text):
+        if self._is_syncing:
+            return
+        line_timing = parse_lrc_words(line_text)
+        if not line_timing:
+            return
+        self._is_syncing = True
+        self.audio_editor_panel.seek_to(line_timing[0][0])
+        self._is_syncing = False
+
+    def _on_subtitle_clicked(self, index, start_sec):
+        if self._is_syncing:
+            return
+        block = self.preview.document().firstBlock()
+        while block.isValid():
+            line_timing = parse_lrc_words(block.text())
+            if line_timing and abs(line_timing[0][0] - start_sec) < 0.02:
+                cursor = QTextCursor(block)
+                cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                self._is_syncing = True
+                self.preview.setTextCursor(cursor)
+                self.preview.ensureCursorVisible()
+                self.audio_editor_panel.seek_to(start_sec)
+                self._is_syncing = False
+                return
+            block = block.next()
 
     def _apply_lrc_from_editor(self, text):
         """오디오 편집기에서 자막을 드래그하는 동안 LRC 편집창을 실시간 갱신한다."""
         if not text or text == self.preview.toPlainText():
             return
         scroll = self.preview.verticalScrollBar().value()
-        self.preview.setPlainText(text)
+        was_syncing = self._is_syncing
+        self._is_syncing = True
+        try:
+            self.preview.setPlainText(text)
+        finally:
+            self._is_syncing = was_syncing
         self.preview.verticalScrollBar().setValue(scroll)
 
     def _refresh_preview_parsed(self):
@@ -823,12 +974,20 @@ class MainWindow(QWidget):
                     self.lyrics_edit.setPlainText(plain)
         except Exception:
             pass
+        if not self._is_syncing and hasattr(self, "audio_editor_panel"):
+            self.audio_editor_panel.set_lrc_text(self.preview.toPlainText())
 
-    def _update_preview_lyric(self):
-        if self._player is None:
+    def _update_preview_lyric(self, position_sec=None, total_sec=None):
+        if position_sec is None:
+            if not hasattr(self, "audio_editor_panel"):
+                return
+            position_sec = self.audio_editor_panel.position_seconds
+        if total_sec is None:
+            total_sec = self.audio_editor_panel._play_total_sec
+        if total_sec < 0:
             return
-        pos = self._player.position() / 1000.0
-        total = self._player.duration() / 1000.0
+        pos = position_sec
+        total = total_sec
         # 시간 표시는 타이밍 유무와 관계없이 항상 갱신
         def fmt(t):
             m = int(t // 60); s = t % 60
@@ -890,7 +1049,7 @@ class MainWindow(QWidget):
         cursor.mergeCharFormat(fmt)
         self._last_highlight_block = block
         # 재생 중일 때만 커서 이동 및 자동 스크롤 (일시정지/정지 시 사용자 선택 유지)
-        if self._player is not None and self._player.playbackState() == QMediaPlayer.PlayingState:
+        if self.audio_editor_panel.is_playing:
             self.preview.setTextCursor(cursor)
             self.preview.ensureCursorVisible()
 
@@ -903,25 +1062,17 @@ class MainWindow(QWidget):
 
     def _on_play_toggle(self):
         """재생/일시정지 토글."""
-        audio_path = self.audio_edit.text().strip()
-        if self._player is None:
-            self.preview_play()
-        elif self._player.playbackState() == QMediaPlayer.PlayingState:
+        if self.audio_editor_panel.is_playing:
             self.preview_pause()
+        elif self.audio_editor_panel.is_paused:
+            self.audio_editor_panel.resume_playback()
         else:
-            # 오디오 파일이 변경되었으면 소스를 다시 설정
-            current_source = self._player.source().toLocalFile() if self._player.source().isLocalFile() else ""
-            if audio_path and audio_path != current_source:
-                self.preview_play()
-            else:
-                self._player.play()
-                if self._preview_timer is not None:
-                    self._preview_timer.start()
+            self.preview_play()
         self._update_play_btn()
 
     def _update_play_btn(self):
         """재생 상태에 따라 토글 버튼 텍스트와 스타일을 업데이트한다."""
-        if self._player is not None and self._player.playbackState() == QMediaPlayer.PlayingState:
+        if self.audio_editor_panel.is_playing:
             self.preview_section.btn_play_toggle.setText("일시정지")
         else:
             self.preview_section.btn_play_toggle.setText("재생")
@@ -945,28 +1096,21 @@ class MainWindow(QWidget):
         if not self._preview_parsed:
             QMessageBox.warning(self, "경고", "LRC 타이밍이 없습니다. 먼저 타이밍을 생성하세요.")
             return
-        self._ensure_player()
-        # 기존 재생 중이면 정지 후 새로 로드
-        if self._player.playbackState() == QMediaPlayer.PlayingState:
-            self._player.stop()
-        self._player.setSource(QUrl.fromLocalFile(audio_path))
-        self._player.play()
-        self._preview_timer.start()
+        self.audio_editor_panel.set_lrc_text(lrc_text)
+        if self.audio_editor_panel.path1 != audio_path or self.audio_editor_panel.track1 is None:
+            self._pending_preview_path = audio_path
+            self.audio_editor_panel.open_track(1, audio_path)
+            return
+        self.audio_editor_panel.play_current()
         self._update_play_btn()
 
     def preview_pause(self):
-        if self._player is not None:
-            self._player.pause()
-            if self._preview_timer is not None:
-                self._preview_timer.stop()
+        self.audio_editor_panel.pause_playback()
         self._clear_preview_highlight()
         self._update_play_btn()
 
     def preview_stop(self):
-        if self._player is not None:
-            self._player.stop()
-        if self._preview_timer is not None:
-            self._preview_timer.stop()
+        self.audio_editor_panel.stop_playback()
         self.preview_section.preview_lyric_label.setText("")
         self.preview_section.preview_time_label.setText("0:00.00 / 0:00.00")
         self._clear_preview_highlight()
@@ -974,8 +1118,7 @@ class MainWindow(QWidget):
 
     def _on_speed_changed(self, text):
         rate = float(text.replace("x", ""))
-        if self._player is not None:
-            self._player.setPlaybackRate(rate)
+        self.audio_editor_panel.set_playback_rate(rate)
 
     def apply_offset(self):
         ms = self.offset_spin.value()
@@ -1063,12 +1206,18 @@ class MainWindow(QWidget):
 
     def eventFilter(self, obj, event):
         preview = getattr(self, "preview", None)
-        if obj in (preview, self.lyrics_edit) and obj is not None:
+        preview_viewport = preview.viewport() if preview is not None else None
+        lyrics_edit = getattr(self, "lyrics_edit", None)
+        if obj is preview_viewport and event.type() == QEvent.MouseButtonRelease:
+            if event.button() == Qt.LeftButton:
+                cursor = preview.cursorForPosition(event.position().toPoint())
+                self._on_lrc_line_clicked(cursor.block().text())
+        if obj in (preview, preview_viewport, lyrics_edit) and obj is not None:
             if event.type() == QEvent.FocusIn:
-                if obj is preview:
+                if obj in (preview, preview_viewport):
                     self._lrc_before_edit = self.preview.toPlainText()
             elif event.type() == QEvent.FocusOut:
-                if obj is preview:
+                if obj in (preview, preview_viewport):
                     self._normalize_lrc_line_timing()
             elif event.type() == QEvent.Wheel:
                 if event.modifiers() & Qt.ControlModifier:
@@ -1137,35 +1286,40 @@ class MainWindow(QWidget):
 
     def _on_slider_released(self):
         self._slider_dragging = False
-        if self._player is not None:
-            self._player.setPosition(self.preview_slider.value())
-            self._update_preview_lyric()
+        self.audio_editor_panel.seek_to(self.preview_slider.value() / 1000.0)
+        self._update_preview_lyric()
 
     def _on_slider_moved(self, value):
-        if self._player is not None:
-            self._player.setPosition(value)
+        self.audio_editor_panel.seek_to(value / 1000.0)
 
     def keyPressEvent(self, event):
+        if (event.key() == Qt.Key.Key_Space
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self._on_play_toggle()
+            event.accept()
+            return
         if isinstance(self.focusWidget(), QTextEdit):
             super().keyPressEvent(event)
             return
         key = event.key()
         if key == Qt.Key_Space:
-            if self._player is not None and self._player.playbackState() == QMediaPlayer.PlayingState:
+            if self.audio_editor_panel.is_playing:
                 self.preview_pause()
+            elif self.audio_editor_panel.is_paused:
+                self.audio_editor_panel.resume_playback()
             else:
                 self.preview_play()
             event.accept()
             return
         if key == Qt.Key_Left:
-            if self._player is not None:
-                self._player.setPosition(max(0, self._player.position() - 5000))
+            if self.audio_editor_panel.track1 is not None:
+                self.audio_editor_panel.seek_to(max(0, self.audio_editor_panel.position_seconds - 5))
                 self._update_preview_lyric()
             event.accept()
             return
         if key == Qt.Key_Right:
-            if self._player is not None:
-                self._player.setPosition(self._player.position() + 5000)
+            if self.audio_editor_panel.track1 is not None:
+                self.audio_editor_panel.seek_to(self.audio_editor_panel.position_seconds + 5)
                 self._update_preview_lyric()
             event.accept()
             return
@@ -1215,6 +1369,8 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         self._save_settings()
+        self.preview.viewport().removeEventFilter(self)
+        self.audio_editor_panel.shutdown()
         if self.server_proc is not None and self.server_proc.poll() is None:
             try:
                 self.server_proc.terminate()

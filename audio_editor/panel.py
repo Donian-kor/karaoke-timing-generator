@@ -5,21 +5,24 @@ Audacity처럼 반주/보컬 파형을 위아래로 분리해 보여주며,
 구간 자르기, 잡음 제거, 믹싱을 처리합니다.
 """
 import os
-import tempfile
 import numpy as np
 import soundfile as sf
 
 from PySide6 import QtCore
-from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer, QSettings
-from PySide6.QtGui import QKeySequence, QColor, QPainter, QFont, QFontMetrics
+from PySide6.QtCore import Qt, QTimer, QSettings, Signal
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
+    QApplication, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
     QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox, QMenuBar,
     QWidget,
 )
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimedia import QMediaPlayer
 
 from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
+from .subtitle_lane import _SubtitleLane
+from .playback_engine import PlaybackEngine
+from .track_worker import _LoadTrackWorker
+from .waveform import _SelectablePlot
 
 import pyqtgraph as pg
 
@@ -246,385 +249,16 @@ def _resample(data, sr_src, sr_dst):
     return out
 
 
-class _LoadTrackWorker(QThread):
-    """오디오 파일을 백그라운드에서 읽어 UI 멈춤을 방지한다."""
-    finished = Signal(object, object, str, int)  # data, sr, path, which
-    failed = Signal(str)
+class AudioEditorPanel(QWidget):
+    position_changed = Signal(float, float)
+    lrc_updated = Signal(str)
+    track_loaded = Signal(int, str)
+    track_load_failed = Signal(int, str)
+    playback_state_changed = Signal(object)
+    subtitle_clicked = Signal(int, float)
 
-    def __init__(self, path, which):
-        super().__init__()
-        self.path = path
-        self.which = which
-
-    def run(self):
-        try:
-            import soundfile as sf
-            data, sr = sf.read(self.path, dtype="float32", always_2d=False)
-            self.finished.emit(data, sr, self.path, self.which)
-        except Exception as e:
-            self.failed.emit(str(e))
-
-
-class _SelectablePlot(pg.PlotWidget):
-    """마우스 드래그로 구간을 선택할 수 있는 파형 플롯."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.dialog = None
-
-    def event(self, ev):
-        # QGraphicsView/Scene가 ShortcutOverride를 가로채면 창 단축키
-        # (Ctrl+C/V/X/Z, Del)가 파형 위에서 동작하지 않는다. 단축키를 양보한다.
-        if ev.type() == QtCore.QEvent.ShortcutOverride:
-            ev.ignore()
-            return True
-        return super().event(ev)
-
-    def mousePressEvent(self, ev):
-        super().mousePressEvent(ev)
-        if self.dialog is not None and ev.button() == Qt.LeftButton:
-            x = self._x_from_event(ev)
-            if x is not None:
-                self.dialog._on_mouse_pressed_x(x, self)
-
-    def mouseMoveEvent(self, ev):
-        super().mouseMoveEvent(ev)
-        if self.dialog is not None:
-            x = self._x_from_event(ev)
-            if x is not None:
-                self.dialog._on_mouse_moved_x(x)
-
-    def mouseReleaseEvent(self, ev):
-        super().mouseReleaseEvent(ev)
-        if self.dialog is not None and ev.button() == Qt.LeftButton:
-            self.dialog._on_mouse_released_x()
-
-    def keyPressEvent(self, ev):
-        if self.dialog is not None:
-            if ev.key() in (Qt.Key_Delete, Qt.Key_Backspace):
-                self.dialog.delete_selection_silence()
-                ev.accept()
-                return
-            if ev.matches(QKeySequence.StandardKey.Undo):
-                self.dialog.undo()
-                ev.accept()
-                return
-            # 방향키로 선택 구간 정밀 조정 (Shift+좌우: 끝점, 좌우: 시작점)
-            if ev.key() in (Qt.Key_Left, Qt.Key_Right):
-                shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-                delta = 0.01
-                if ev.key() == Qt.Key_Left:
-                    if shift:
-                        self.dialog._adjust_selection_end(-delta)
-                    else:
-                        self.dialog._adjust_selection_start(-delta)
-                else:  # Qt.Key_Right
-                    if shift:
-                        self.dialog._adjust_selection_end(delta)
-                    else:
-                        self.dialog._adjust_selection_start(delta)
-                ev.accept()
-                return
-        super().keyPressEvent(ev)
-
-    def wheelEvent(self, ev):
-        # Ctrl + 마우스 휠: 파형 가로축 확대/축소
-        if ev.modifiers() & Qt.ControlModifier:
-            delta = ev.angleDelta().y()
-            if delta == 0:
-                super().wheelEvent(ev)
-                return
-            vb = self.getViewBox()
-            x_min, x_max = vb.viewRange()[0]
-            span = x_max - x_min
-            if span <= 0:
-                super().wheelEvent(ev)
-                return
-            pos = ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
-            scene_pos = self.mapToScene(pos)
-            x_mouse = float(vb.mapSceneToView(scene_pos).x())
-            factor = 0.8 if delta > 0 else 1.25
-            new_span = span * factor
-            # 너무 과도한 확대/축소 방지
-            new_span = max(1e-4, min(new_span, 1e9))
-            ratio = (x_mouse - x_min) / span
-            new_min = x_mouse - ratio * new_span
-            new_max = new_min + new_span
-            vb.setXRange(new_min, new_max, padding=0)
-            ev.accept()
-            return
-        super().wheelEvent(ev)
-
-    def _x_from_event(self, ev):
-        try:
-            scene_pos = self.mapToScene(ev.pos())
-            return float(self.getViewBox().mapSceneToView(scene_pos).x())
-        except Exception:
-            return None
-
-
-class _SubtitleLane(QWidget):
-    """파형 아래에 LRC 자막을 시간축에 맞춰 표시한다.
-
-    위쪽 줄(대사 줄)을 드래그하면 줄 전체 싱크가 이동하고,
-    아래쪽 줄(단어)을 드래그하면 Enhanced LRC의 단어별 싱크가 이동한다.
-    """
-
-    LINE_Y = 2
-    LINE_H = 20
-    WORD_Y = 26
-    WORD_H = 18
-
-    def __init__(self, plot, parent=None):
-        super().__init__(parent)
-        self.plot = plot
-        self.entries = []
-        self.playhead = 0.0
-        self.changed = None
-        self.moved = None
-        self._has_words = False
-        self._drag_kind = None       # "line" / "word"
-        self._drag_index = -1
-        self._drag_word = -1
-        self._drag_x0 = 0.0
-        self._drag_t0 = 0.0
-        self._drag_end = 0.0
-        self._drag_word_starts = []
-        self._hover = None
-        self.setFixedHeight(28)
-        self.setMouseTracking(True)
-        self.setCursor(Qt.ArrowCursor)
-        self.setToolTip(
-            "위쪽 줄: 자막 줄 전체를 좌우로 드래그\n"
-            "아래쪽 줄: 단어별로 좌우 드래그 (Enhanced LRC)"
-        )
-        self.setVisible(False)
-
-    def set_entries(self, entries):
-        self.entries = entries
-        self._has_words = any(e.get("words") for e in entries)
-        self.setFixedHeight(48 if self._has_words else 28)
-        self.setVisible(bool(entries))
-        self.update()
-
-    def set_playhead(self, t):
-        self.playhead = t
-        self.update()
-
-    # ---------- 좌표 변환 ----------
-    def _x_to_time(self, x):
-        try:
-            vb = self.plot.getViewBox()
-            scene_pt = self.plot.mapToScene(int(x), 0)
-            return float(vb.mapSceneToView(scene_pt).x())
-        except Exception:
-            return 0.0
-
-    def _time_to_x(self, t):
-        try:
-            vb = self.plot.getViewBox()
-            scene_pt = vb.mapViewToScene(QtCore.QPointF(float(t), 0.0))
-            return float(self.plot.mapFromScene(scene_pt).x())
-        except Exception:
-            return 0.0
-
-    def _line_at(self, t):
-        for i, e in enumerate(self.entries):
-            if e["start"] <= t < e["end"]:
-                return i
-        return -1
-
-    def _word_at(self, i, t):
-        words = self.entries[i].get("words") or []
-        for j, w in enumerate(words):
-            end = words[j + 1]["start"] if j + 1 < len(words) else self.entries[i]["end"]
-            if w["start"] <= t < end:
-                return j
-        return -1
-
-    # ---------- 그리기 ----------
-    def _paint_block(self, p, fm, start, end, y, h, text,
-                     active=False, dragging=False, word=False):
-        x1 = self._time_to_x(start)
-        x2 = self._time_to_x(end)
-        if x2 < 0 or x1 > self.width():
-            return
-        left = max(0.0, x1)
-        right = min(float(self.width()) - 1.0, x2)
-        if word:
-            right -= 1.0
-        if right - left < 2.0:
-            right = left + 2.0
-        rect = QtCore.QRectF(left, float(y), right - left, float(h))
-        if dragging:
-            p.fillRect(rect, QColor("#f59e0b"))
-            p.setPen(QColor("#0f172a"))
-        elif active:
-            p.fillRect(rect, QColor("#fbbf24"))
-            p.setPen(QColor("#0f172a"))
-        elif word:
-            p.fillRect(rect, QColor("#334155"))
-            p.setPen(QColor("#e2e8f0"))
-        else:
-            p.fillRect(rect, QColor("#1e293b"))
-            p.setPen(QColor("#cbd5e1"))
-        if rect.width() > 8:
-            shown = fm.elidedText(text, Qt.ElideRight, int(rect.width()) - 6)
-            p.drawText(rect.adjusted(3.0, 0.0, -3.0, 0.0),
-                       Qt.AlignVCenter | Qt.AlignLeft, shown)
-
-    def paintEvent(self, ev):
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#0f172a"))
-        font = QFont()
-        font.setPointSize(9)
-        p.setFont(font)
-        fm = QFontMetrics(font)
-
-        # 대사 줄
-        for i, e in enumerate(self.entries):
-            active = e["start"] <= self.playhead < e["end"]
-            self._paint_block(
-                p, fm, e["start"], e["end"],
-                self.LINE_Y, self.LINE_H, e["text"],
-                active=active,
-                dragging=(self._drag_kind == "line" and self._drag_index == i),
-            )
-
-        # 단어 줄
-        if self._has_words:
-            for i, e in enumerate(self.entries):
-                words = e.get("words") or []
-                for j, w in enumerate(words):
-                    end = words[j + 1]["start"] if j + 1 < len(words) else e["end"]
-                    active = w["start"] <= self.playhead < end
-                    self._paint_block(
-                        p, fm, w["start"], end,
-                        self.WORD_Y, self.WORD_H, w["text"],
-                        active=active,
-                        dragging=(self._drag_kind == "word"
-                                  and self._drag_index == i
-                                  and self._drag_word == j),
-                        word=True,
-                    )
-        p.end()
-
-    # ---------- 마우스 ----------
-    def mousePressEvent(self, ev):
-        if ev.button() != Qt.LeftButton:
-            return super().mousePressEvent(ev)
-        pos = ev.position()
-        t = self._x_to_time(pos.x())
-
-        if self._has_words and pos.y() >= self.WORD_Y - 2 and pos.y() <= self.WORD_Y + self.WORD_H + 2:
-            i = self._line_at(t)
-            if i < 0:
-                return super().mousePressEvent(ev)
-            j = self._word_at(i, t)
-            if j < 0:
-                return super().mousePressEvent(ev)
-            self._drag_kind = "word"
-            self._drag_index = i
-            self._drag_word = j
-            self._drag_x0 = pos.x()
-            self._drag_t0 = self.entries[i]["words"][j]["start"]
-            self.setCursor(Qt.ClosedHandCursor)
-            self.update()
-            ev.accept()
-            return
-
-        i = self._line_at(t)
-        if i < 0:
-            return super().mousePressEvent(ev)
-        self._drag_kind = "line"
-        self._drag_index = i
-        self._drag_word = -1
-        self._drag_x0 = pos.x()
-        self._drag_t0 = self.entries[i]["start"]
-        self._drag_end = self.entries[i]["end"]
-        self._drag_word_starts = [w["start"] for w in (self.entries[i].get("words") or [])]
-        self.setCursor(Qt.ClosedHandCursor)
-        self.update()
-        ev.accept()
-
-    def mouseMoveEvent(self, ev):
-        pos = ev.position()
-        x = pos.x()
-        if self._drag_kind == "line":
-            e = self.entries[self._drag_index]
-            dt = self._x_to_time(x) - self._x_to_time(self._drag_x0)
-            dur = self._drag_end - self._drag_t0
-            start = max(0.0, self._drag_t0 + dt)
-            e["start"] = start
-            e["end"] = start + dur
-            for w, ws in zip(e.get("words") or [], self._drag_word_starts):
-                w["start"] = max(0.0, ws + dt)
-            self.update()
-            if callable(self.moved):
-                self.moved(self._drag_index, -1)
-            ev.accept()
-            return
-
-        if self._drag_kind == "word":
-            e = self.entries[self._drag_index]
-            words = e.get("words") or []
-            j = self._drag_word
-            if not (0 <= j < len(words)):
-                return
-            lo = 0.0 if j == 0 else words[j - 1]["start"] + 0.01
-            hi = (words[j + 1]["start"] if j + 1 < len(words) else e["end"]) - 0.01
-            if hi < lo:
-                hi = lo
-            dt = self._x_to_time(x) - self._x_to_time(self._drag_x0)
-            new_start = min(max(lo, self._drag_t0 + dt), hi)
-            words[j]["start"] = new_start
-            if j == 0:
-                e["start"] = new_start
-            self.update()
-            if callable(self.moved):
-                self.moved(self._drag_index, j)
-            ev.accept()
-            return
-
-        # 커서 모양
-        t = self._x_to_time(x)
-        hover = None
-        if self._has_words and self.WORD_Y - 2 <= pos.y() <= self.WORD_Y + self.WORD_H + 2:
-            i = self._line_at(t)
-            if i >= 0:
-                j = self._word_at(i, t)
-                if j >= 0:
-                    hover = ("word", i, j)
-        if hover is None:
-            i = self._line_at(t)
-            if i >= 0:
-                hover = ("line", i, -1)
-        if hover != self._hover:
-            self._hover = hover
-            self.setCursor(Qt.OpenHandCursor if hover else Qt.ArrowCursor)
-        super().mouseMoveEvent(ev)
-
-    def mouseReleaseEvent(self, ev):
-        if self._drag_kind:
-            kind = self._drag_kind
-            i = self._drag_index
-            j = self._drag_word
-            self._drag_kind = None
-            self._drag_index = -1
-            self._drag_word = -1
-            self.setCursor(Qt.OpenHandCursor)
-            self.update()
-            if callable(self.changed):
-                self.changed(i, j if kind == "word" else -1)
-            ev.accept()
-            return
-        super().mouseReleaseEvent(ev)
-
-
-class AudioEditorDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("오디오 편집기 (멀티트랙)")
-        self.resize(900, 700)
 
         # 트랙 데이터
         self.track1 = None   # 반주
@@ -638,13 +272,19 @@ class AudioEditorDialog(QDialog):
         self._curves = {}    # 플롯별 파형 커브 (clear() 대신 이것만 제거)
 
         self.history = []    # (which, data, sr)
-        self._player = None
-        self._audio_out = None
-        self._temp_play = None
+        self._playback_engine = PlaybackEngine(self)
+        self._player = self._playback_engine.player
+        self._playback_engine.position_changed.connect(self._on_position_changed)
+        self._playback_engine.media_status_changed.connect(self._on_media_status)
+        self._playback_engine.playback_state_changed.connect(
+            lambda state: self.playback_state_changed.emit(state)
+        )
+        self._playback_engine.error_occurred.connect(
+            lambda message: QMessageBox.critical(self, "오류", f"재생 준비 실패:\n{message}")
+        )
         self._settings = QSettings("KaraokeTimingGenerator", "AudioEditor")
         self._syncing_region = False
         self._play_total_sec = 0.0
-        self._pending_seek_ms = None
         # 선택 영역을 트랙별로 관리한다.
         self._edit_track = 1      # 편집 대상 트랙 (1/2)
         self._play_track = 1      # 재생 시작점을 가져올 트랙 (1/2/3)
@@ -690,6 +330,7 @@ class AudioEditorDialog(QDialog):
             "QMenu::item:pressed { background-color: #BFDBFE; }"
         )
         layout.addWidget(menubar)
+        self.menu_bar = menubar
 
         # 파일 메뉴
         file_menu = menubar.addMenu("파일(F)")
@@ -775,6 +416,9 @@ class AudioEditorDialog(QDialog):
         self.status = QLabel("")
         toolbar.addWidget(self.status)
         layout.addLayout(toolbar)
+        self._top_toolbar = toolbar
+        self.btn_open_vocal = btn_open2
+        self._compact_transport_controls = (btn_play, btn_stop, self.time_label, self.status)
 
         # 재생 슬라이더
         play_row = QHBoxLayout()
@@ -797,8 +441,18 @@ class AudioEditorDialog(QDialog):
         self.plot2.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
         self.plot3 = _SelectablePlot()
         self.plot3.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
-        for p in (self.plot1, self.plot2, self.plot3):
-            p.dialog = self
+        for plot in (self.plot1, self.plot2, self.plot3):
+            plot.mouse_pressed_x.connect(self._on_mouse_pressed_x)
+            plot.mouse_moved_x.connect(self._on_mouse_moved_x)
+            plot.mouse_released.connect(self._on_mouse_released_x)
+            plot.delete_requested.connect(self.delete_selection_silence)
+            plot.undo_requested.connect(self.undo)
+            plot.selection_adjust_requested.connect(
+                lambda delta, adjust_end: (
+                    self._adjust_selection_end if adjust_end
+                    else self._adjust_selection_start
+                )(delta)
+            )
         self.plot2.setXLink(self.plot1)
         self.plot3.setXLink(self.plot1)
 
@@ -836,6 +490,7 @@ class AudioEditorDialog(QDialog):
         # 파형 아래 자막 레인 (LRC를 불러오면 표시)
         self.sub_lane = _SubtitleLane(self.plot1)
         self.sub_lane.changed = self._on_lrc_moved
+        self.sub_lane.line_clicked.connect(self.subtitle_clicked.emit)
 
         # 드래그 중 메인 창 LRC 편집창으로 약 50ms 간격으로 전달한다.
         self._lrc_live_timer = QTimer(self)
@@ -928,80 +583,74 @@ class AudioEditorDialog(QDialog):
         trim_frame = QFrame()
         trim_frame.setFrameShape(QFrame.StyledPanel)
         trim_frame.setProperty("section", True)
-        trim_layout = QVBoxLayout(trim_frame)
-        trim_layout.setSpacing(6)
-        trim_layout.setContentsMargins(12, 10, 12, 10)
+        trim_layout = QHBoxLayout(trim_frame)
+        trim_layout.setSpacing(4)
+        trim_layout.setContentsMargins(6, 4, 6, 4)
 
-        # 1줄: 선택 구간 요약 + 트리밍 버튼들 (1줄로 통합)
-        trim_rows = QVBoxLayout()
-        trim_rows.setSpacing(6)
-
-        trim_row1 = QHBoxLayout()
-        trim_row1.setSpacing(4)
-        trim_row1.addStretch(1)
-        btn_keep = QPushButton("선택 구간만 남기기")
-        btn_keep.clicked.connect(self.trim_keep)
-        btn_keep.setProperty("success", True)
-        trim_row1.addWidget(btn_keep)
-        btn_export = QPushButton("선택 구간 내보내기")
-        btn_export.clicked.connect(self.trim_export_selected)
-        btn_export.setProperty("success", True)
-        trim_row1.addWidget(btn_export)
-        btn_norm = QPushButton("정규화 (볼륨 최대치 맞춤)")
-        btn_norm.clicked.connect(self.normalize_track)
-        btn_norm.setProperty("success", True)
-        trim_row1.addWidget(btn_norm)
-        btn_fade = QPushButton("페이드 인/아웃")
-        btn_fade.clicked.connect(self.fade_in_out)
-        btn_fade.setProperty("success", True)
-        trim_row1.addWidget(btn_fade)
-        btn_loop = QPushButton("선택 구간 반복 재생")
-        btn_loop.clicked.connect(self.loop_play)
-        btn_loop.setProperty("success", True)
-        trim_row1.addWidget(btn_loop)
-        btn_denoise_file = QPushButton("파일 잡음 제거 (고급)")
-        btn_denoise_file.setToolTip(
-            "파일 전체를 스트리밍으로 처리합니다. 원본은 수정하지 않고 새 파일로 저장합니다.")
-        btn_denoise_file.clicked.connect(self.open_denoise_dialog)
-        btn_denoise_file.setProperty("success", True)
-        trim_row1.addWidget(btn_denoise_file)
-        trim_rows.addLayout(trim_row1)
-
-        trim_row2 = QHBoxLayout()
-        trim_row2.setSpacing(4)
-        trim_row2.addStretch(1)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
+        self.progress.setFixedWidth(72)
         self.progress.setVisible(False)
-        trim_row2.addWidget(self.progress)
+        trim_layout.addWidget(self.progress)
 
-        btn_mix = QPushButton("믹싱 미리보기 (1+2)")
+        btn_keep = QPushButton("남기기")
+        btn_keep.setToolTip("선택 구간만 남기기")
+        btn_keep.clicked.connect(self.trim_keep)
+        btn_keep.setProperty("success", True)
+        trim_layout.addWidget(btn_keep)
+        btn_export = QPushButton("구간 내보내기")
+        btn_export.setToolTip("선택 구간을 새 오디오 파일로 내보내기")
+        btn_export.clicked.connect(self.trim_export_selected)
+        btn_export.setProperty("success", True)
+        trim_layout.addWidget(btn_export)
+        btn_norm = QPushButton("정규화")
+        btn_norm.setToolTip("볼륨 최대치에 맞춰 정규화")
+        btn_norm.clicked.connect(self.normalize_track)
+        btn_norm.setProperty("success", True)
+        trim_layout.addWidget(btn_norm)
+        btn_fade = QPushButton("페이드")
+        btn_fade.setToolTip("페이드 인/아웃 적용")
+        btn_fade.clicked.connect(self.fade_in_out)
+        btn_fade.setProperty("success", True)
+        trim_layout.addWidget(btn_fade)
+        btn_loop = QPushButton("반복")
+        btn_loop.setToolTip("선택 구간 반복 재생")
+        btn_loop.clicked.connect(self.loop_play)
+        btn_loop.setProperty("success", True)
+        trim_layout.addWidget(btn_loop)
+        btn_mix = QPushButton("믹스")
+        btn_mix.setToolTip("반주와 보컬 믹싱 미리보기")
         btn_mix.clicked.connect(self.mix_tracks)
-        trim_row2.addWidget(btn_mix)
+        trim_layout.addWidget(btn_mix)
 
-        btn_save1 = QPushButton("1번 트랙 저장")
+        btn_save1 = QPushButton("트랙 1")
+        btn_save1.setToolTip("1번 트랙 저장")
         btn_save1.clicked.connect(lambda: self.save_track(1))
         btn_save1.setProperty("secondary", True)
-        trim_row2.addWidget(btn_save1)
-        btn_save2 = QPushButton("2번 트랙 저장")
+        trim_layout.addWidget(btn_save1)
+        btn_save2 = QPushButton("트랙 2")
+        btn_save2.setToolTip("2번 트랙 저장")
         btn_save2.clicked.connect(lambda: self.save_track(2))
         btn_save2.setProperty("secondary", True)
-        trim_row2.addWidget(btn_save2)
-        btn_save_both = QPushButton("두 트랙 따로 저장")
+        trim_layout.addWidget(btn_save2)
+        btn_save_both = QPushButton("분리 저장")
+        btn_save_both.setToolTip("두 트랙을 각각 저장")
         btn_save_both.clicked.connect(self.save_both_tracks)
         btn_save_both.setProperty("secondary", True)
-        trim_row2.addWidget(btn_save_both)
-        btn_save_res = QPushButton("믹스 미리보기 저장")
+        trim_layout.addWidget(btn_save_both)
+        btn_save_res = QPushButton("믹스 저장")
         btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
         btn_save_res.clicked.connect(self.save_result)
         btn_save_res.setProperty("secondary", True)
-        trim_row2.addWidget(btn_save_res)
-        trim_row2.addStretch(1)
-
-        trim_rows.addLayout(trim_row2)
-        trim_layout.addLayout(trim_rows)
+        trim_layout.addWidget(btn_save_res)
+        trim_layout.addStretch(1)
         layout.addWidget(trim_frame)
 
+        self.trim_buttons = (
+            btn_keep, btn_export, btn_norm, btn_fade, btn_loop,
+            btn_mix, btn_save1, btn_save2, btn_save_both, btn_save_res,
+        )
+        self._compact_duplicate_controls = (btn_open1,)
 
         # 마우스로 파형 드래그 선택
         self._selecting = False
@@ -1013,7 +662,7 @@ class AudioEditorDialog(QDialog):
     def _setup_plot(self, plot, bg, wave_pen):
         plot.setBackground(bg)
         plot.showGrid(x=True, y=True, alpha=0.25)
-        plot.setMinimumHeight(120)
+        plot.setMinimumHeight(52)
         # 마우스 왼쪽 드래그는 화면 이동(pan)이 아니라 구간 선택에만 쓴다.
         plot.setMouseEnabled(x=False, y=False)
         plot.wave_pen = wave_pen
@@ -1024,7 +673,7 @@ class AudioEditorDialog(QDialog):
         frame = QFrame()
         frame.setStyleSheet(
             f"QFrame {{ background: {bg}; border: 1px solid {accent}; border-radius: 6px; }}")
-        frame.setFixedWidth(220)
+        frame.setFixedWidth(170)
         v = QVBoxLayout(frame)
         v.setContentsMargins(8, 6, 8, 6)
         v.setSpacing(4)
@@ -1115,6 +764,18 @@ class AudioEditorDialog(QDialog):
         self._region_to_spins()
         self._update_target_highlight()
 
+    def set_compact_mode(self, compact=True):
+        self.menu_bar.setVisible(not compact)
+        self.play_slider.setVisible(not compact)
+        for control in self._compact_transport_controls:
+            control.setVisible(not compact)
+        for control in self._compact_duplicate_controls:
+            control.setVisible(not compact)
+
+    def take_vocal_open_button(self):
+        self._top_toolbar.removeWidget(self.btn_open_vocal)
+        return self.btn_open_vocal
+
     def _update_target_highlight(self):
         """현재 편집 대상 트랙의 파형에 강조 테두리를 입힌다."""
         if self._edit_track == 1:
@@ -1201,16 +862,22 @@ class AudioEditorDialog(QDialog):
                 self, "오디오 파일 선택", start, "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a);;All Files (*)")
         if not path:
             return
+        if path == getattr(self, f"path{which}"):
+            return
+        if path == getattr(self, f"_loading_path_{which}", None):
+            return
+        setattr(self, f"_loading_path_{which}", path)
         if os.path.isdir(os.path.dirname(path)):
             self._settings.setValue("last_open_dir", os.path.dirname(path))
         self.progress.setVisible(True)
         self._load_worker = _LoadTrackWorker(path, which)
         self._load_worker.finished.connect(lambda data, sr, p, w=which: self._on_track_loaded(w, data, sr, p))
-        self._load_worker.failed.connect(lambda msg: self._on_track_load_failed(msg))
+        self._load_worker.failed.connect(lambda msg, w=which: self._on_track_load_failed(msg, w))
         self._load_worker.start()
 
     def _on_track_loaded(self, which, data, sr, path):
         self.progress.setVisible(False)
+        setattr(self, f"_loading_path_{which}", None)
         if which == 1:
             self.path1 = path
             self.label1.setText(f"반주(1번): {os.path.basename(path)}")
@@ -1218,9 +885,13 @@ class AudioEditorDialog(QDialog):
             self.path2 = path
             self.label2.setText(f"보컬(2번): {os.path.basename(path)}")
         self._set_track(which, data, sr, f"불러옴: {os.path.basename(path)}")
+        self.track_loaded.emit(which, path)
 
-    def _on_track_load_failed(self, msg):
+    def _on_track_load_failed(self, msg, which=None):
         self.progress.setVisible(False)
+        if which is not None:
+            setattr(self, f"_loading_path_{which}", None)
+            self.track_load_failed.emit(which, msg)
         QMessageBox.critical(self, "오류", f"파일을 열 수 없습니다:\n{msg}")
 
     def save_track(self, which):
@@ -1374,29 +1045,6 @@ class AudioEditorDialog(QDialog):
         if data is None:
             QMessageBox.information(self, "정보", "재생할 트랙이 없습니다.")
             return
-        # 기존 재생 정지
-        if self._player is not None:
-            self._player.stop()
-        # 이전 임시 파일 정리
-        if self._temp_play and os.path.exists(self._temp_play):
-            try:
-                os.remove(self._temp_play)
-            except Exception:
-                pass
-        try:
-            fd, tmp = tempfile.mkstemp(suffix=".wav")
-            os.close(fd)
-            sf.write(tmp, data, sr)
-            self._temp_play = tmp
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"재생 준비 실패:\n{e}")
-            return
-        if self._player is None:
-            self._player = QMediaPlayer()
-            self._audio_out = QAudioOutput()
-            self._player.setAudioOutput(self._audio_out)
-            self._player.positionChanged.connect(self._on_position_changed)
-            self._player.mediaStatusChanged.connect(self._on_media_status)
         self._play_total_sec = len(data) / sr
         # 선택 구간이 있으면 그 시작점에서, 없으면 핀포인트 위치에서 재생 시작
         r = self._region_for_track(self._play_track).getRegion()
@@ -1407,9 +1055,7 @@ class AudioEditorDialog(QDialog):
         else:
             start = float(self.cursor1.pos().x())
         start = max(0.0, min(start, max(0.0, self._play_total_sec - 0.01)))
-        self._pending_seek_ms = int(start * 1000)
-        self._player.setSource(QUrl.fromLocalFile(tmp))
-        self._player.play()
+        self._playback_engine.play(data, sr, start)
         self.status.setText(f"재생 중... ({start:.2f}초부터)")
 
     def _apply_live_mix(self):
@@ -1492,6 +1138,7 @@ class AudioEditorDialog(QDialog):
             QMessageBox.warning(self, "오류", f"LRC 파일을 읽을 수 없습니다:\n{e}")
             return
         self._set_lrc_entries(self._parse_lrc(text))
+        self.lrc_updated.emit(text)
         self.status.setText(f"LRC 로드: {len(self.lrc_entries)}개 자막")
 
     @staticmethod
@@ -1521,11 +1168,11 @@ class AudioEditorDialog(QDialog):
 
     def _emit_lrc_live(self):
         """드래그 중 바뀐 LRC를 메인 창에 실시간으로 넘긴다."""
-        if not callable(self.lrc_live_callback):
-            return
         text = self._build_lrc_text()
         if text:
-            self.lrc_live_callback(text)
+            self.lrc_updated.emit(text)
+            if callable(self.lrc_live_callback):
+                self.lrc_live_callback(text)
 
     def save_lrc(self):
         if not self.lrc_entries:
@@ -1582,15 +1229,10 @@ class AudioEditorDialog(QDialog):
         self._update_subtitles()
         # 시간 라벨
         self.time_label.setText(f"{pos_ms / 1000.0:.2f} / {self._play_total_sec:.2f}")
+        self.position_changed.emit(float(t), float(self._play_total_sec))
 
     def _on_media_status(self, status):
-        from PySide6.QtMultimedia import QMediaPlayer
-        if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
-            seek = getattr(self, "_pending_seek_ms", None)
-            if seek is not None:
-                self._player.setPosition(seek)
-                self._pending_seek_ms = None
-        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
             if self._loop_mode:
                 self._player.setPosition(0)
                 self._player.play()
@@ -1604,6 +1246,30 @@ class AudioEditorDialog(QDialog):
         pos_ms = int(value / 1000.0 * self._play_total_sec * 1000.0)
         self._player.setPosition(pos_ms)
 
+    @property
+    def is_playing(self):
+        return self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+    @property
+    def is_paused(self):
+        return self._player.playbackState() == QMediaPlayer.PlaybackState.PausedState
+
+    @property
+    def position_seconds(self):
+        return self._player.position() / 1000.0
+
+    def pause_playback(self):
+        self._playback_engine.pause()
+
+    def resume_playback(self):
+        self._player.play()
+
+    def seek_to(self, position_sec):
+        self._playback_engine.seek(float(position_sec) * 1000.0)
+
+    def set_playback_rate(self, rate):
+        self._playback_engine.set_playback_rate(rate)
+
     def stop_playback(self):
         self._loop_mode = False
         if self._player is not None:
@@ -1613,6 +1279,7 @@ class AudioEditorDialog(QDialog):
             ph.setPos(0)
         self.time_label.setText(f"0.00 / {self._play_total_sec:.2f}" if self._play_total_sec else "0.00 / 0.00")
         self.status.setText("정지")
+        self.position_changed.emit(0.0, float(self._play_total_sec))
 
     # ---------- 마우스 선택 ----------
     def _track_for_plot(self, plot):
@@ -1911,32 +1578,11 @@ class AudioEditorDialog(QDialog):
         if i1 <= i0:
             return
         segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
-        # 기존 재생 정지 및 임시 파일 정리
-        if self._player is not None:
-            self._player.stop()
-        if self._temp_play and os.path.exists(self._temp_play):
-            try:
-                os.remove(self._temp_play)
-            except Exception:
-                pass
-        try:
-            fd, tmp = tempfile.mkstemp(suffix=".wav")
-            os.close(fd)
-            sf.write(tmp, segment, sr)
-            self._temp_play = tmp
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"재생 준비 실패:\n{e}")
-            return
-        if self._player is None:
-            self._player = QMediaPlayer()
-            self._audio_out = QAudioOutput()
-            self._player.setAudioOutput(self._audio_out)
-            self._player.positionChanged.connect(self._on_position_changed)
-            self._player.mediaStatusChanged.connect(self._on_media_status)
         self._loop_mode = True
         self._loop_start = s
         self._play_total_sec = len(segment) / sr
-        self._player.setSource(QUrl.fromLocalFile(tmp))
+        if not self._playback_engine.play(segment, sr):
+            return
         # 재생 시작 전 플레이헤드를 구간 시작 위치로 설정
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(s)
@@ -2054,17 +1700,10 @@ class AudioEditorDialog(QDialog):
             return
         super().keyPressEvent(ev)
 
+    def shutdown(self):
+        self._playback_engine.cleanup()
+
     def closeEvent(self, event):
-        # 창을 닫을 때 재생 중이면 정지
-        if self._player is not None:
-            try:
-                self._player.stop()
-            except Exception:
-                pass
-        if self._temp_play and os.path.exists(self._temp_play):
-            try:
-                os.remove(self._temp_play)
-            except Exception:
-                pass
+        self.shutdown()
         super().closeEvent(event)
         event.accept()

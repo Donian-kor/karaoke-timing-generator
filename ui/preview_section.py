@@ -40,6 +40,57 @@ class PreviewSection(QFrame):
         self._build_ui()
         self.collapse()
 
+    def set_compact_mode(self):
+        self._title_btn.hide()
+        self._content.setVisible(True)
+        self._expanded = True
+        self.setMinimumHeight(36)
+        self.setMaximumHeight(42)
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        self.layout().setSpacing(0)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(0)
+
+        self.preview_lyric_label.setWordWrap(False)
+        self.preview_lyric_label.setMinimumWidth(0)
+        self.preview_lyric_label.setMinimumHeight(28)
+        self.preview_lyric_label.setMaximumHeight(34)
+        self.preview_lyric_label.setStyleSheet(
+            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 14px; "
+            "font-weight: 700; color: #1E293B; background: #FFFFFF; "
+            "padding: 3px 8px; border-radius: 4px; border: 1px solid #E2E8F0;"
+        )
+
+    def move_controls_to(self, layout):
+        self._content_layout.removeWidget(self.preview_time_label)
+        self._content_layout.removeWidget(self.preview_slider)
+        self._content_layout.removeItem(self._controls_row)
+
+        controls = (
+            self.btn_play_toggle,
+            self.btn_stop,
+            self.preview_time_label,
+            self.preview_slider,
+            self.speed_label,
+            self.speed_combo,
+            self.color_label,
+            self.color_combo,
+        )
+        for control in controls:
+            self._controls_row.removeWidget(control)
+            if control is self.preview_slider:
+                layout.addWidget(control, 1)
+            else:
+                layout.addWidget(control)
+
+        self.preview_time_label.setMinimumWidth(112)
+        self.preview_time_label.setMaximumWidth(132)
+        self.preview_time_label.setStyleSheet("font-size: 11px; font-weight: 700;")
+        self.preview_slider.setMinimumWidth(96)
+        self.btn_play_toggle.setFixedWidth(64)
+        self.btn_stop.setFixedWidth(64)
+        self.speed_combo.setFixedWidth(78)
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 2, 8)
@@ -102,7 +153,8 @@ class PreviewSection(QFrame):
         self.btn_stop.setProperty("secondary", True)
         prow_row.addWidget(self.btn_stop)
 
-        prow_row.addWidget(QLabel("속도:"))
+        self.speed_label = QLabel("속도:")
+        prow_row.addWidget(self.speed_label)
         self.speed_combo = QComboBox()
         self.speed_combo.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x"])
         self.speed_combo.setCurrentText("1.0x")
@@ -111,13 +163,16 @@ class PreviewSection(QFrame):
 
         prow_row.addStretch(1)
 
-        prow_row.addWidget(QLabel("색상:"))
+        self.color_label = QLabel("색상:")
+        prow_row.addWidget(self.color_label)
         self.color_combo = QComboBox()
         self.color_combo.addItems(["현재", "지난", "다가올"])
         self.color_combo.setCurrentText("현재")
         self.color_combo.setFixedWidth(70)
         self.color_combo.currentTextChanged.connect(lambda text: self.color_changed.emit(text))
         prow_row.addWidget(self.color_combo)
+        self._controls_row = prow_row
+        self._controls_row = prow_row
 
         self._content_layout.addLayout(prow_row)
 

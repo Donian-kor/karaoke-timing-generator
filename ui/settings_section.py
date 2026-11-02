@@ -107,10 +107,12 @@ class SettingsSection(QFrame):
         self.audio_edit = QLineEdit()
         row.addWidget(self.audio_edit, 1)
         btn_browse = QPushButton("찾기")
+        self.btn_audio_browse = btn_browse
         btn_browse.setProperty("secondary", True)
         btn_browse.clicked.connect(lambda: self.audio_browse_clicked.emit())
         row.addWidget(btn_browse)
         self._content_layout.addLayout(row)
+        self._audio_file_row = row
 
         # 2행: 언어 / 모델 / 연산
         row = QHBoxLayout()
@@ -227,6 +229,15 @@ class SettingsSection(QFrame):
 
     def is_collapsed(self) -> bool:
         return self._collapsed
+
+    def take_audio_browse_button(self):
+        self._audio_file_row.removeWidget(self.btn_audio_browse)
+        self.btn_audio_browse.setText("오디오 열기")
+        return self.btn_audio_browse
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if self._collapsed != collapsed:
+            self._toggle_collapse()
 
     # ---------- 편의 메서드 ----------
 

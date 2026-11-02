@@ -35,7 +35,7 @@ class LyricsSection(QFrame):
         self.setObjectName("lyricsSection")
         self.setProperty("section", True)
         self._build_ui()
-        self.setMinimumHeight(420)
+        self.setMinimumHeight(190)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -60,7 +60,7 @@ class LyricsSection(QFrame):
         self.btn_audio_edit.setProperty("success", True)
         self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 80px;")
         self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
-        self.btn_audio_edit.setFixedWidth(160)
+        self.btn_audio_edit.setFixedWidth(140)
         title_row.addWidget(self.btn_audio_edit)
 
         self.btn_denoise = QPushButton("잡음 제거")
@@ -78,7 +78,7 @@ class LyricsSection(QFrame):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         self.lyrics_edit = QTextEdit()
-        self.lyrics_edit.setMinimumHeight(400)
+        self.lyrics_edit.setMinimumHeight(100)
         self.lyrics_edit.setMinimumWidth(150)
         self.lyrics_edit.setPlaceholderText(
             "원본 가사를 여기에 입력하세요.\n"
@@ -90,7 +90,7 @@ class LyricsSection(QFrame):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         self.preview = QTextEdit()
-        self.preview.setMinimumHeight(400)
+        self.preview.setMinimumHeight(100)
         self.preview.setMinimumWidth(150)
         self.preview.setReadOnly(False)
         self.preview.setPlaceholderText(
@@ -134,7 +134,7 @@ class LyricsSection(QFrame):
         self.btn_auto_offset.clicked.connect(lambda: self.auto_offset_clicked.emit())
         btns_layout.addWidget(self.btn_auto_offset)
 
-        btns_layout.addSpacing(50)
+        btns_layout.addSpacing(12)
 
         self.line_offset_spin = QSpinBox()
         self.line_offset_spin.setRange(-5000, 5000)
@@ -152,7 +152,7 @@ class LyricsSection(QFrame):
         self.btn_line_offset.setProperty("secondary", True)
         btns_layout.addWidget(self.btn_line_offset)
 
-        btns_layout.addSpacing(30)
+        btns_layout.addSpacing(12)
 
         self.offset_spin = QSpinBox()
         self.offset_spin.setRange(-5000, 5000)
@@ -170,6 +170,19 @@ class LyricsSection(QFrame):
 
         btns_layout.addStretch(1)
         layout.addLayout(btns_layout)
+        self._buttons_layout = btns_layout
+
+    def move_offset_controls_to(self, layout):
+        controls = (
+            self.btn_auto_offset,
+            self.line_offset_spin,
+            self.btn_line_offset,
+            self.offset_spin,
+            self.btn_offset,
+        )
+        for control in controls:
+            self._buttons_layout.removeWidget(control)
+            layout.addWidget(control)
 
     def set_generating(self, generating: bool) -> None:
         """생성 중 상태에 따라 버튼 텍스트와 색상을 토글한다."""
