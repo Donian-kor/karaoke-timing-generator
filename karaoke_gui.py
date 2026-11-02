@@ -83,6 +83,7 @@ class MainWindow(QWidget):
         self._preview_timer = None
         self._settings = self._load_settings()
         self._preview_parsed = []
+        self._slider_dragging = False
         self._last_highlight_block = None
         self._lrc_before_edit = ""
         self._color_state = self._settings.get("colors", {"current": "#fbbf24", "past": "#6b7280", "future": "#ffffff"})
@@ -254,6 +255,8 @@ class MainWindow(QWidget):
         self.preview_section.play_toggled.connect(self._on_play_toggle)
         self.preview_section.stop_clicked.connect(self.preview_stop)
         self.preview_section.slider_moved.connect(self._on_slider_moved)
+        self.preview_slider.sliderPressed.connect(self._on_slider_pressed)
+        self.preview_slider.sliderReleased.connect(self._on_slider_released)
         self.preview_section.speed_changed.connect(self._on_speed_changed)
         self.preview_section.color_changed.connect(self._on_color_changed)
         self.preview_section.collapsed_changed.connect(self._on_preview_collapsed)
@@ -823,7 +826,7 @@ class MainWindow(QWidget):
         total_ms = int(total * 1000)
         if total_ms > 0 and self.preview_section.preview_slider.maximum() != total_ms:
             self.preview_section.preview_slider.setRange(0, total_ms)
-        if not self.preview_section.preview_slider.isSliderDown():
+        if not self._slider_dragging and not self.preview_section.preview_slider.isSliderDown():
             self.preview_section.preview_slider.blockSignals(True)
             self.preview_section.preview_slider.setValue(int(pos * 1000))
             self.preview_section.preview_slider.blockSignals(False)
@@ -1117,10 +1120,18 @@ class MainWindow(QWidget):
         # 수동 편집 결과도 적용 대상으로 유지
         self._last_enhanced = self.preview.toPlainText()
 
+    def _on_slider_pressed(self):
+        self._slider_dragging = True
+
+    def _on_slider_released(self):
+        self._slider_dragging = False
+        if self._player is not None:
+            self._player.setPosition(self.preview_slider.value())
+            self._update_preview_lyric()
+
     def _on_slider_moved(self, value):
         if self._player is not None:
             self._player.setPosition(value)
-            self._update_preview_lyric()
 
     def keyPressEvent(self, event):
         if isinstance(self.focusWidget(), QTextEdit):
