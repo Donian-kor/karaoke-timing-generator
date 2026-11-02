@@ -1212,6 +1212,8 @@ class MainWindow(QWidget):
 
 
 def main():
+    # Qt multimedia FFmpeg 정보 로그 억제
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.ffmpeg=false")
     app = QApplication(sys.argv)
     # 중복 실행 방지: 이미 실행 중이면 메시지를 띄우고 종료
     from PySide6.QtCore import QLockFile
