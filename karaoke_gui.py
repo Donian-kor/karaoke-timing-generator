@@ -1212,14 +1212,14 @@ class MainWindow(QWidget):
 
 
 def main():
-    # Qt multimedia FFmpeg 정보 로그 억제
-    os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.ffmpeg=false")
     app = QApplication(sys.argv)
     # 중복 실행 방지: 이미 실행 중이면 메시지를 띄우고 종료
     from PySide6.QtCore import QLockFile
     import tempfile
     lock_path = os.path.join(tempfile.gettempdir(), "karaoke-timing-generator.lock")
     _instance_lock = QLockFile(lock_path)
+    # 이전에 비정상 종료된 경우 남은 잠금 파일 제거
+    _instance_lock.removeStaleLockFile()
     if not _instance_lock.tryLock(100):
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.warning(None, "이미 실행 중", "프로그램이 이미 실행 중입니다.")
