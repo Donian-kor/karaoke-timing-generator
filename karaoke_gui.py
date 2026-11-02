@@ -606,7 +606,15 @@ class MainWindow(QWidget):
         self.status_label.setText("타이밍 생성 중...")
         self.preview.clear()
 
-        self.worker = TranscribeWorker(audio_path, self.lang_combo.currentData(), self.lyrics_edit.toPlainText().strip())
+        # 미리보기(LRC)의 가사를 우선 사용하고, 비어 있으면 lyrics_edit 사용
+        lrc_text = self.preview.toPlainText().strip()
+        if lrc_text:
+            lyrics_for_gen = lrc_to_plain_text(lrc_text)
+        else:
+            lyrics_for_gen = self.lyrics_edit.toPlainText().strip()
+        if not lyrics_for_gen:
+            lyrics_for_gen = self.lyrics_edit.toPlainText().strip()
+        self.worker = TranscribeWorker(audio_path, self.lang_combo.currentData(), lyrics_for_gen)
         self.worker.progress.connect(lambda m: self.status_label.setText(m))
         self.worker.finished.connect(self.on_finished)
         self.worker.failed.connect(self.on_failed)
@@ -792,6 +800,12 @@ class MainWindow(QWidget):
         """LRC 편집 내용이 변경되면 재생 파싱 결과를 갱신한다."""
         try:
             self._preview_parsed = parse_lrc_words(self.preview.toPlainText())
+            # LRC에서 추출한 가사를 lyrics_edit에 동기화 (타이밍 생성 시 사용)
+            lrc_text = self.preview.toPlainText().strip()
+            if lrc_text:
+                plain = lrc_to_plain_text(lrc_text)
+                if plain and plain != self.lyrics_edit.toPlainText().strip():
+                    self.lyrics_edit.setPlainText(plain)
         except Exception:
             pass
 
