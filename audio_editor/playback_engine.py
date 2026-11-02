@@ -19,9 +19,8 @@ class PlaybackEngine(QObject):
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
-        self.player.positionChanged.connect(
-            lambda position: self.position_changed.emit(int(position))
-        )
+        self._last_emitted_position = None
+        self.player.positionChanged.connect(self._emit_position_if_changed)
         self.player.mediaStatusChanged.connect(self._on_media_status_changed)
         self.player.playbackStateChanged.connect(
             lambda state: self.playback_state_changed.emit(state)
@@ -36,9 +35,16 @@ class PlaybackEngine(QObject):
 
     def _poll_position(self):
         try:
-            self.position_changed.emit(int(self.player.position()))
+            self._emit_position_if_changed(self.player.position())
         except Exception:
             pass
+
+    def _emit_position_if_changed(self, position):
+        position = int(position)
+        if position == self._last_emitted_position:
+            return
+        self._last_emitted_position = position
+        self.position_changed.emit(position)
 
     def _update_poll_timer(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
@@ -47,9 +53,7 @@ class PlaybackEngine(QObject):
             self._poll_timer.stop()
 
     def play(self, data, sample_rate, start_sec=0.0):
-        self.player.stop()
-        self.player.setSource(QUrl())
-        self._remove_temp_file()
+        self.stop()
 
         temp_path = None
         try:
@@ -70,7 +74,11 @@ class PlaybackEngine(QObject):
 
     def stop(self):
         self._poll_timer.stop()
+        self._last_emitted_position = None
         self.player.stop()
+        self.player.setSource(QUrl())
+        self._pending_seek_ms = None
+        self._remove_temp_file()
 
     def pause(self):
         self._poll_timer.stop()
@@ -83,10 +91,7 @@ class PlaybackEngine(QObject):
         self.player.setPlaybackRate(float(rate))
 
     def cleanup(self):
-        self._poll_timer.stop()
-        self.player.stop()
-        self.player.setSource(QUrl())
-        self._remove_temp_file()
+        self.stop()
 
     def _on_media_status_changed(self, status):
         if status in (QMediaPlayer.MediaStatus.LoadedMedia,

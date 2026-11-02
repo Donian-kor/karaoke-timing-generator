@@ -366,10 +366,7 @@ class AudioEditorPanel(QWidget):
         # 드래그 중 메인 창 LRC 편집창으로 약 50ms 간격(throttle)으로 전달한다.
         import time
         self._lrc_live_last_emit = 0.0
-        self._lrc_live_timer = QTimer(self)
-        self._lrc_live_timer.setSingleShot(True)
-        self._lrc_live_timer.setInterval(50)
-        self._lrc_live_timer.timeout.connect(self._emit_lrc_live)
+
         def _emit_lrc_live_throttled(*_):
             now = time.monotonic()
             if now - self._lrc_live_last_emit >= 0.05:
@@ -1118,7 +1115,8 @@ class AudioEditorPanel(QWidget):
             x_min, x_max = vb.viewRange()[0]
             if position_sec < x_min or position_sec > x_max:
                 span = x_max - x_min
-                vb.setXRange(position_sec - span * 0.3, position_sec + span * 0.7, padding=0)
+                new_min = max(0.0, position_sec - span * 0.3)
+                vb.setXRange(new_min, new_min + span, padding=0)
         except Exception:
             pass
         self._update_subtitles(position_sec)
@@ -1173,8 +1171,7 @@ class AudioEditorPanel(QWidget):
     def stop_playback(self):
         self._loop_mode = False
         self._loop_start = 0.0
-        if self._player is not None:
-            self._player.stop()
+        self._playback_engine.stop()
         self.play_slider.setValue(0)
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(0)

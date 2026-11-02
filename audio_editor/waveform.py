@@ -49,10 +49,12 @@ class _SelectablePlot(pg.PlotWidget):
             self.undo_requested.emit()
             ev.accept()
             return
-        # 선택 영역 미세 조정은 Shift+좌/우로만 처리하고, 일반 좌/우는
-        # 상위 창의 5초 이동 단축키로 전파한다 (계획서 §5.3).
-        if ev.key() in (Qt.Key_Left, Qt.Key_Right) and (ev.modifiers() & Qt.ShiftModifier):
-            adjust_end = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        # Shift는 시작점, Ctrl+Shift는 끝점을 조절한다.
+        if ev.key() in (Qt.Key_Left, Qt.Key_Right):
+            modifiers = ev.modifiers()
+            if not (modifiers & Qt.KeyboardModifier.ShiftModifier):
+                return super().keyPressEvent(ev)
+            adjust_end = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
             delta = 0.01 if ev.key() == Qt.Key_Right else -0.01
             self.selection_adjust_requested.emit(delta, adjust_end)
             ev.accept()
@@ -78,6 +80,7 @@ class _SelectablePlot(pg.PlotWidget):
             new_span = max(1e-4, min(span * factor, 1e9))
             ratio = (x_mouse - x_min) / span
             new_min = x_mouse - ratio * new_span
+            new_min = max(0.0, new_min)
             vb.setXRange(new_min, new_min + new_span, padding=0)
             ev.accept()
             return
