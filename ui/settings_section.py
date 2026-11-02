@@ -74,6 +74,8 @@ class SettingsSection(QFrame):
 
         # 콘텐츠 영역 (접기/펼치기 대상)
         self._content = QWidget()
+        # 내부 QWidget의 기본 회색 배경이 겹쳐 보이지 않도록 투명 처리
+        self._content.setStyleSheet("background-color: transparent;")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(12)
@@ -88,6 +90,10 @@ class SettingsSection(QFrame):
         self.btn_server_toggle = QPushButton("서버 시작")
         self.btn_server_toggle.clicked.connect(lambda: self.server_toggle_clicked.emit())
         self.btn_server_toggle.setProperty("success", True)
+        # 흰색 글씨가 잘 보이지 않는 문제 방지: 진한 글씨색 사용
+        self.btn_server_toggle.setStyleSheet(
+            "color: #111827; font-weight: 700; "
+            "border: 1px solid #BDBDBD; border-radius: 4px;")
         row.addWidget(self.btn_server_toggle)
         self.btn_health = QPushButton("상태 확인")
         self.btn_health.clicked.connect(lambda: self.health_check_clicked.emit())
@@ -111,6 +117,10 @@ class SettingsSection(QFrame):
         row.setSpacing(8)
         row.addWidget(QLabel("언어:"))
         self.lang_combo = QComboBox()
+        self.lang_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
         for code, label in (
             ("ko", "한국어"),
             ("en", "영어"),
