@@ -373,11 +373,11 @@ class AudioEditorPanel(QWidget):
         grid.setColumnStretch(1, 1)
 
         self.plot1 = _SelectablePlot()
-        self.plot1.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
+        self.plot1.setToolTip("클릭: 재생 위치 이동. 마우스 드래그: 구간 선택. Ctrl + 휠: 확대/축소")
         self.plot2 = _SelectablePlot()
-        self.plot2.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
+        self.plot2.setToolTip("클릭: 재생 위치 이동. 마우스 드래그: 구간 선택. Ctrl + 휠: 확대/축소")
         self.plot3 = _SelectablePlot()
-        self.plot3.setToolTip("Ctrl + 마우스 휠: 가로 확대/축소. 마우스 드래그: 구간 선택")
+        self.plot3.setToolTip("클릭: 재생 위치 이동. 마우스 드래그: 구간 선택. Ctrl + 휠: 확대/축소")
         for plot in (self.plot1, self.plot2, self.plot3):
             plot.mouse_pressed_x.connect(self._on_mouse_pressed_x)
             plot.mouse_moved_x.connect(self._on_mouse_moved_x)
@@ -1246,17 +1246,17 @@ class AudioEditorPanel(QWidget):
     def _on_position_changed(self, pos_ms):
         if self._play_total_sec <= 0:
             return
-        dur_ms = self._play_total_sec * 1000.0
-        # 슬라이더 갱신 (사용자가 드래그 중이 아닐 때)
-        if not self.play_slider.isSliderDown():
-            self.play_slider.blockSignals(True)
-            self.play_slider.setValue(int(pos_ms / dur_ms * 1000))
-            self.play_slider.blockSignals(False)
-        # 플레이헤드 갱신
         position_sec = pos_ms / 1000.0
         if self._loop_mode:
             position_sec += self._loop_start
         timeline_total_sec = self._timeline_total_sec or self._play_total_sec
+        # 슬라이더 갱신 (사용자가 드래그 중이 아닐 때)
+        if not self.play_slider.isSliderDown():
+            slider_value = int(position_sec / timeline_total_sec * 1000)
+            self.play_slider.blockSignals(True)
+            self.play_slider.setValue(max(0, min(1000, slider_value)))
+            self.play_slider.blockSignals(False)
+        # 플레이헤드 갱신
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(position_sec)
         # 플레이헤드가 화면 밖으로 나가면 파형을 자동으로 따라간다 (auto-pan)
@@ -1284,10 +1284,10 @@ class AudioEditorPanel(QWidget):
                 self.status.setText("재생 완료")
 
     def _on_slider_moved(self, value):
-        if self._player is None or self._play_total_sec <= 0:
+        timeline_total_sec = self._timeline_total_sec or self._play_total_sec
+        if self._player is None or self._play_total_sec <= 0 or timeline_total_sec <= 0:
             return
-        pos_ms = int(value / 1000.0 * self._play_total_sec * 1000.0)
-        self._player.setPosition(pos_ms)
+        self.seek_to(value / 1000.0 * timeline_total_sec)
 
     @property
     def is_playing(self):
@@ -1311,9 +1311,19 @@ class AudioEditorPanel(QWidget):
     def seek_to(self, position_sec):
         target_sec = float(position_sec)
         if self._loop_mode:
-            target_sec -= self._loop_start
+            loop_end = self._loop_start + self._play_total_sec
+            target_sec = min(max(self._loop_start, target_sec), loop_end)
+            player_sec = target_sec - self._loop_start
+        else:
             target_sec = min(max(0.0, target_sec), self._play_total_sec)
-        self._playback_engine.seek(target_sec * 1000.0)
+            player_sec = target_sec
+        self._playback_engine.seek(player_sec * 1000.0)
+        timeline_total_sec = self._timeline_total_sec or self._play_total_sec
+        if timeline_total_sec > 0:
+            slider_value = int(target_sec / timeline_total_sec * 1000)
+            self.play_slider.blockSignals(True)
+            self.play_slider.setValue(max(0, min(1000, slider_value)))
+            self.play_slider.blockSignals(False)
 
     def set_playback_rate(self, rate):
         self._playback_engine.set_playback_rate(rate)
@@ -1367,6 +1377,14 @@ class AudioEditorPanel(QWidget):
         # 핀포인트(재생 시작 위치)는 모든 트랙에 표시한다.
         for c in (self.cursor1, self.cursor2, self.cursor3):
             c.setPos(x)
+        duration = self._track_duration(track)
+        playback_active = self.is_playing or self.is_paused
+        if duration > 0 and not playback_active:
+            if not self._loop_mode:
+                self._timeline_total_sec = duration
+            self._set_slider_position(x, self._timeline_total_sec or duration)
+        if playback_active:
+            self.seek_to(x)
 
         if track in (1, 2):
             # 드래그한 트랙을 편집 대상으로 맞춘다.
@@ -1389,6 +1407,31 @@ class AudioEditorPanel(QWidget):
             self._sync_regions(region)
         if track in (1, 2):
             self._region_to_spins()
+
+    def _track_duration(self, track):
+        if track in (1, 2) and self.chk_link_selection.isChecked():
+            durations = [
+                len(data) / sr
+                for data, sr in ((self.track1, self.sr1), (self.track2, self.sr2))
+                if data is not None and sr
+            ]
+            return max(durations, default=0.0)
+        if track == 1 and self.track1 is not None and self.sr1:
+            return len(self.track1) / self.sr1
+        if track == 2 and self.track2 is not None and self.sr2:
+            return len(self.track2) / self.sr2
+        if track == 3 and self.result is not None and self.result_sr:
+            return len(self.result) / self.result_sr
+        return 0.0
+
+    def _set_slider_position(self, position_sec, duration_sec):
+        if duration_sec <= 0:
+            return
+        position_sec = max(0.0, min(float(position_sec), duration_sec))
+        value = int(position_sec / duration_sec * 1000)
+        self.play_slider.blockSignals(True)
+        self.play_slider.setValue(max(0, min(1000, value)))
+        self.play_slider.blockSignals(False)
 
     def _on_mouse_moved_x(self, x):
         if not self._selecting:
