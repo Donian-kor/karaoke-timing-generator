@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QSlider, QMessageBox, QWidget,
 )
+from .karaoke_label import KaraokeLabel
 
 
 class PreviewSection(QFrame):
@@ -49,15 +50,9 @@ class PreviewSection(QFrame):
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(0)
 
-        self.preview_lyric_label.setWordWrap(False)
-        self.preview_lyric_label.setMinimumWidth(0)
         self.preview_lyric_label.setMinimumHeight(60)
         self.preview_lyric_label.setMaximumHeight(100)
-        self.preview_lyric_label.setStyleSheet(
-            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 28px; "
-            "font-weight: 700; color: #FFFFFF; background-color: #000000; "
-            "padding: 12px 16px; border-radius: 8px; border: 1px solid #475569;"
-        )
+
         # 재생 시간/슬라이더는 파형 편집기(target_row)로 이동했으므로
         # 미리보기 밴드에서는 숨긴다 (로직용 참조는 유지).
         self.preview_time_label.setVisible(False)
@@ -83,6 +78,22 @@ class PreviewSection(QFrame):
             self._controls_row.removeWidget(control)
             control.setParent(None)
         return controls
+
+    def update_color_combo_colors(self, past_color: str, future_color: str) -> None:
+        """색상 콤보박스 항목에 실제 색상 스와치와 텍스트 색을 적용한다."""
+        from PySide6.QtGui import QColor, QPixmap
+        from PySide6.QtCore import Qt
+        colors = (past_color, future_color)
+        for i, color in enumerate(colors):
+            self.color_combo.setItemData(i, QColor(color), Qt.ForegroundRole)
+            # 작은 색상 스와치 아이콘
+            pix = QPixmap(12, 12)
+            pix.fill(QColor(color))
+            self.color_combo.setItemIcon(i, QIcon(pix) if False else self._make_icon(pix))
+
+    def _make_icon(self, pix):
+        from PySide6.QtGui import QIcon
+        return QIcon(pix)
 
     def move_controls_to(self, layout):
         """하위 호환용 — 이제 각 컨트롤을 개별적으로 이동하므로 아무 동작도 하지 않는다."""
@@ -110,17 +121,10 @@ class PreviewSection(QFrame):
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(12)
 
-        # 미리보기 가사 라벨
-        self.preview_lyric_label = QLabel("자막 미리보기")
-        self.preview_lyric_label.setAlignment(Qt.AlignCenter)
-        self.preview_lyric_label.setFocusPolicy(Qt.ClickFocus)
-        self.preview_lyric_label.setWordWrap(True)
-        self.preview_lyric_label.setTextFormat(Qt.RichText)
-        self.preview_lyric_label.setMinimumHeight(100)
-        self.preview_lyric_label.setStyleSheet(
-            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 28px; font-weight: 700; color: #FFFFFF; "
-            "background-color: #000000; padding: 20px; border-radius: 8px; border: 1px solid #475569;"
-        )
+        # 미리보기 가사 라벨 (노래방 스타일 좌→우 채우기)
+        self.preview_lyric_label = KaraokeLabel()
+        self.preview_lyric_label.setMinimumHeight(80)
+        self.preview_lyric_label.setMaximumHeight(110)
         self._content_layout.addWidget(self.preview_lyric_label, 1)
 
         # 재생 시간 라벨
@@ -162,10 +166,10 @@ class PreviewSection(QFrame):
         self.color_label = QLabel("색상:")
         prow_row.addWidget(self.color_label)
         self.color_combo = QComboBox()
-        self.color_combo.addItems(["현재", "지난", "다가올"])
+        self.color_combo.addItems(["지난", "다가올"])
         self.color_combo.setCurrentText("현재")
         self.color_combo.setFixedWidth(70)
-        self.color_combo.currentTextChanged.connect(lambda text: self.color_changed.emit(text))
+        self.color_combo.activated.connect(lambda idx: self.color_changed.emit(self.color_combo.itemText(idx)))
         prow_row.addWidget(self.color_combo)
         self._controls_row = prow_row
         self._controls_row = prow_row
@@ -178,7 +182,7 @@ class PreviewSection(QFrame):
 
     def show_placeholder(self) -> None:
         """미리보기 가사 라벨에 흰색 제목을 표시한다."""
-        self.preview_lyric_label.setText("자막 미리보기")
+        self.preview_lyric_label.set_placeholder()
 
     def set_lyric_text(self, text: str) -> None:
         """미리보기 가사 텍스트를 설정한다."""
@@ -190,7 +194,7 @@ class PreviewSection(QFrame):
 
     def clear(self) -> None:
         """가사와 시간 라벨을 비운다."""
-        self.preview_lyric_label.setText("자막 미리보기")
+        self.preview_lyric_label.set_placeholder()
         self.preview_time_label.setText("0:00.00 / 0:00.00")
 
     def set_slider_range(self, minimum: int, maximum: int) -> None:

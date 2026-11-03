@@ -115,6 +115,8 @@ class MainWindow(QWidget):
                 "window_size": [self.width(), self.height()],
                 "splitter_sizes": self.vsplitter.sizes(),
                 "waveform_visible": self.chk_waveform_visible.isChecked(),
+                "audio_path": self.audio_edit.text().strip(),
+                "lyrics_text": self.preview.toPlainText(),
             }
             with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -164,6 +166,14 @@ class MainWindow(QWidget):
                 idx = self.lang_combo.findData(self._settings["language"])
                 if idx >= 0:
                     self.lang_combo.setCurrentIndex(idx)
+            # 불러온 오디오 파일 경로 복원 (textChanged → _on_audio_path_changed → 자동 로드)
+            audio_path = self._settings.get("audio_path")
+            if isinstance(audio_path, str) and audio_path.strip():
+                self.audio_edit.setText(audio_path.strip())
+            # 가사/LRC 입력창 복원
+            lyrics_text = self._settings.get("lyrics_text")
+            if isinstance(lyrics_text, str) and lyrics_text.strip():
+                self.preview.setPlainText(lyrics_text)
             window_size = self._settings.get("window_size")
             if isinstance(window_size, list) and len(window_size) == 2:
                 self.resize(*window_size)
@@ -317,6 +327,14 @@ class MainWindow(QWidget):
         # ── 재생 미리보기 섹션 (PreviewSection 위젯) ─────────────────────
         self.preview_section = PreviewSection()
         self.preview_section.set_compact_mode()
+        # 자막 미리보기 라벨 초기 색상 적용
+        self.preview_section.preview_lyric_label.set_fill_colors(
+            self._color_state["past"], self._color_state["past"])
+        self.preview_section.preview_lyric_label.set_empty_color(
+            self._color_state["future"])
+        # 색상 콤보박스 항목에 실제 색상 스와치/글자색 적용
+        self.preview_section.update_color_combo_colors(
+            self._color_state["past"], self._color_state["future"])
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
         self.preview_lyric_label = self.preview_section.preview_lyric_label
         self.preview_time_label = self.preview_section.preview_time_label
@@ -1093,20 +1111,8 @@ class MainWindow(QWidget):
         else:
             self._highlight_preview_line(idx)
             start, end, words, full = self._preview_parsed[idx]
-            parts = []
-            for (wstart, wend, wtext) in words:
-                escaped_word = html.escape(wtext, quote=True)
-                if wstart <= pos < wend:
-                    color = html.escape(self._color_state["current"], quote=True)
-                    parts.append(f'<span style="color:{color}; font-weight:800; text-decoration:underline;">{escaped_word}</span>')
-                elif pos >= wend:
-                    color = html.escape(self._color_state["past"], quote=True)
-                    parts.append(f'<span style="color:{color};">{escaped_word}</span>')
-                else:
-                    color = html.escape(self._color_state["future"], quote=True)
-                    parts.append(f'<span style="color:{color};">{escaped_word}</span>')
-            self.preview_section.preview_lyric_label.setText(" ".join(parts))
-        pass
+            # 현재 줄을 좌→우로 채우는 노래방 방식으로 표시한다.
+            self.preview_section.preview_lyric_label.set_karaoke_line(words, full, pos)
 
     def _highlight_preview_line(self, line_index):
         """preview QTextEdit에서 해당 줄을 하이라이트하고 스크롤한다."""
@@ -1159,19 +1165,47 @@ class MainWindow(QWidget):
 
     def _update_play_btn(self):
         """재생 상태에 따라 토글 버튼 텍스트와 스타일을 업데이트한다."""
+        btn = self.preview_section.btn_play_toggle
         if self.audio_editor_panel.is_playing:
-            self.preview_section.btn_play_toggle.setText("정지")
+            btn.setText("일시정지")
+            btn.setStyleSheet(
+                "QPushButton { background-color: #D97706; color: white; font-weight: 700; "
+                "border: none; border-radius: 4px; padding: 6px 16px; min-height: 28px; }"
+                "QPushButton:hover { background-color: #B45309; }"
+                "QPushButton:pressed { background-color: #92400E; padding-top: 7px; padding-bottom: 5px; }")
+        elif self.audio_editor_panel.is_paused:
+            btn.setText("재생")
+            btn.setStyleSheet(
+                "QPushButton { background-color: #059669; color: white; font-weight: 700; "
+                "border: none; border-radius: 4px; padding: 6px 16px; min-height: 28px; }"
+                "QPushButton:hover { background-color: #047857; }"
+                "QPushButton:pressed { background-color: #065F46; padding-top: 7px; padding-bottom: 5px; }")
         else:
-            self.preview_section.btn_play_toggle.setText("재생")
+            btn.setText("재생")
+            btn.setStyleSheet(
+                "QPushButton { background-color: #059669; color: white; font-weight: 700; "
+                "border: none; border-radius: 4px; padding: 6px 16px; min-height: 28px; }"
+                "QPushButton:hover { background-color: #047857; }"
+                "QPushButton:pressed { background-color: #065F46; padding-top: 7px; padding-bottom: 5px; }")
 
     def _on_color_changed(self, text):
         """색상 콤보박스 변경 시 해당 위치 색상을 수정한다."""
-        key_map = {"현재": "current", "지난": "past", "다가올": "future"}
-        key = key_map.get(text, "current")
+        key_map = {"지난": "past", "다가올": "future"}
+        key = key_map.get(text, "past")
         c = QColorDialog.getColor(QColor(self._color_state[key]), self, f"{text} 색상")
         if c.isValid():
             self._color_state[key] = c.name()
             self._save_settings()
+            # 자막 미리보기 라벨 색상 즉시 반영
+            if key == "past":
+                self.preview_section.preview_lyric_label.set_fill_colors(
+                    self._color_state["past"], self._color_state["past"])
+            else:
+                self.preview_section.preview_lyric_label.set_empty_color(
+                    self._color_state["future"])
+            # 색상 콤보박스 스와치/글자색 갱신
+            self.preview_section.update_color_combo_colors(
+                self._color_state["past"], self._color_state["future"])
 
     def _start_integrated_playback(self):
         audio_path = self.audio_edit.text().strip()

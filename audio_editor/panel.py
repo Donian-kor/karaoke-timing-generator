@@ -819,14 +819,20 @@ class AudioEditorPanel(QWidget):
         if which == 1:
             self.track1 = np.asarray(data) if data is not None else None
             self.sr1 = int(sr) if sr is not None else None
-            self._plot_track(self.plot1, self.track1, self.sr1, "보컬 (Track 1)")
+            title = "보컬 (Track 1)"
+            if self.path1:
+                title = f"{os.path.basename(self.path1)}  —  {title}"
+            self._plot_track(self.plot1, self.track1, self.sr1, title)
             if self.track1 is not None:
                 dur = len(self.track1) / self.sr1
                 self.region1.setRegion((0, min(1.0, dur)))
         else:
             self.track2 = np.asarray(data) if data is not None else None
             self.sr2 = int(sr) if sr is not None else None
-            self._plot_track(self.plot2, self.track2, self.sr2, "반주 (Track 2)")
+            title = "반주 (Track 2)"
+            if self.path2:
+                title = f"{os.path.basename(self.path2)}  —  {title}"
+            self._plot_track(self.plot2, self.track2, self.sr2, title)
             if self.track2 is not None:
                 dur = len(self.track2) / self.sr2
                 self.region2.setRegion((0, min(1.0, dur)))
