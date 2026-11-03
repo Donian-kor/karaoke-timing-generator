@@ -175,6 +175,30 @@ def _build_design_qss() -> str:
         QSlider::handle:horizontal:hover {{
             background: {c['primary_hover']};
         }}
+        QSlider#trackVolumeSlider::groove:horizontal {{
+            background: #0F766E;
+        }}
+        QSlider#trackVolumeSlider {{
+            background: transparent;
+        }}
+        QSlider#trackVolumeSlider::handle:horizontal {{
+            background: #0F766E;
+        }}
+        QSlider#trackVolumeSlider::handle:horizontal:hover {{
+            background: #115E59;
+        }}
+        QSlider#trackHeightSlider::groove:horizontal {{
+            background: #7C3AED;
+        }}
+        QSlider#trackHeightSlider {{
+            background: transparent;
+        }}
+        QSlider#trackHeightSlider::handle:horizontal {{
+            background: #7C3AED;
+        }}
+        QSlider#trackHeightSlider::handle:horizontal:hover {{
+            background: #6D28D9;
+        }}
         #previewSection QSlider::groove:horizontal {{
             background: #4CAF50;
         }}

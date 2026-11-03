@@ -649,27 +649,11 @@ class AudioEditorPanel(QWidget):
         name.setStyleSheet(f"color: {accent}; font-weight: 700; border: none;")
         v.addWidget(name)
 
-        controls = QHBoxLayout()
-        controls.setSpacing(4)
-        icon = QLabel("🔊")
-        icon.setStyleSheet("border: none;")
-        icon.setAlignment(Qt.AlignHCenter)
-        volume_column = QVBoxLayout()
-        volume_column.setSpacing(0)
-        volume_column.addWidget(icon)
-        vol = QSlider(Qt.Vertical)
-        vol.setRange(0, 200)
-        vol.setValue(100)
-        vol.setFixedSize(20, 64)
-        vol.setAccessibleName(f"{title} 볼륨")
-        volume_column.addWidget(vol, 1, Qt.AlignHCenter)
-        controls.addLayout(volume_column, 1)
-
-        buttons_column = QVBoxLayout()
-        buttons_column.setSpacing(4)
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(4)
         mute = QPushButton("M")
         mute.setCheckable(True)
-        mute.setFixedWidth(28)
+        mute.setFixedSize(28, 24)
         mute.setToolTip("M: 이 트랙 음소거")
         mute.setStyleSheet(
             "QPushButton { background: #E5E7EB; color: #111827; font-weight: 700; "
@@ -677,10 +661,10 @@ class AudioEditorPanel(QWidget):
             "QPushButton:checked { background: #DC2626; color: white; }"
             "QPushButton:hover { background: #D1D5DB; }"
         )
-        buttons_column.addWidget(mute)
+        buttons_row.addWidget(mute)
         solo = QPushButton("S")
         solo.setCheckable(True)
-        solo.setFixedWidth(28)
+        solo.setFixedSize(28, 24)
         solo.setToolTip("S: 이 트랙만 재생 (다른 트랙 음소거)")
         solo.setStyleSheet(
             "QPushButton { background: #E5E7EB; color: #111827; font-weight: 700; "
@@ -688,26 +672,39 @@ class AudioEditorPanel(QWidget):
             "QPushButton:checked { background: #F59E0B; color: #111827; }"
             "QPushButton:hover { background: #D1D5DB; }"
         )
-        buttons_column.addWidget(solo)
-        buttons_column.addStretch(1)
-        controls.addLayout(buttons_column)
+        buttons_row.addWidget(solo)
+        buttons_row.addStretch(1)
+        v.addLayout(buttons_row)
 
-        height_column = QVBoxLayout()
-        height_column.setSpacing(0)
-        height_icon = QLabel("↕")
-        height_icon.setAlignment(Qt.AlignHCenter)
-        height_icon.setToolTip("트랙 높이 조절")
-        height_column.addWidget(height_icon)
+        volume_row = QHBoxLayout()
+        volume_row.setSpacing(4)
+        icon = QLabel("🔊")
+        icon.setStyleSheet("border: none;")
+        volume_row.addWidget(icon)
+        vol = QSlider(Qt.Horizontal)
+        vol.setObjectName("trackVolumeSlider")
+        vol.setRange(0, 200)
+        vol.setValue(100)
+        vol.setFixedHeight(20)
+        vol.setAccessibleName(f"{title} 볼륨")
+        volume_row.addWidget(vol, 1)
+        v.addLayout(volume_row)
+
+        height_row = QHBoxLayout()
+        height_row.setSpacing(4)
+        height_label = QLabel("높이")
+        height_label.setStyleSheet("border: none;")
+        height_row.addWidget(height_label)
         # 트랙 높이 조절 슬라이더
-        height = QSlider(Qt.Vertical)
+        height = QSlider(Qt.Horizontal)
+        height.setObjectName("trackHeightSlider")
         height.setRange(50, 400)
         height.setValue(140)
-        height.setFixedSize(20, 64)
+        height.setFixedHeight(20)
         height.setToolTip("트랙 높이 조절")
         height.setAccessibleName(f"{title} 트랙 높이")
-        height_column.addWidget(height, 1, Qt.AlignHCenter)
-        controls.addLayout(height_column, 1)
-        v.addLayout(controls, 1)
+        height_row.addWidget(height, 1)
+        v.addLayout(height_row)
 
         info = None
         if show_info:
