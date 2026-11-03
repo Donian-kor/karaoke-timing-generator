@@ -404,16 +404,14 @@ class AudioEditorPanel(QWidget):
         self._setup_plot(self.plot3, "#ddd6fe", "#0f172a")
 
         self.header1, self.vol1, self.mute1, self.solo1, self.info1, self.height1 = self._make_track_header(
-            "보컬 (Track 1)", "#99f6e4", "#0f766e")
+            "보컬 (Track 1)", "#99f6e4", "#0f766e", show_info=False)
         self.header2, self.vol2, self.mute2, self.solo2, self.info2, self.height2 = self._make_track_header(
-            "반주 (Track 2)", "#bfdbfe", "#1d4ed8")
+            "반주 (Track 2)", "#bfdbfe", "#1d4ed8", show_info=False)
         self.header3, self.vol3, self.mute3, self.solo3, self.info3, self.height3 = self._make_track_header(
             "믹싱 미리보기", "#ddd6fe", "#6d28d9")
         self.vol3.setEnabled(False)
         self.mute3.setEnabled(False)
         self.solo3.setEnabled(False)
-        self.label1 = self.info1
-        self.label2 = self.info2
 
         # 트랙 높이 슬라이더와 플롯 높이 연결
         self.height1.valueChanged.connect(lambda v: self.plot1.setFixedHeight(v))
@@ -639,26 +637,36 @@ class AudioEditorPanel(QWidget):
         plot.getAxis("left").setPen(pg.mkPen("#334155"))
         plot.getAxis("bottom").setPen(pg.mkPen("#334155"))
 
-    def _make_track_header(self, title, bg, accent):
+    def _make_track_header(self, title, bg, accent, show_info=True):
         frame = QFrame()
         frame.setStyleSheet(
             f"QFrame {{ background: {bg}; border: 1px solid {accent}; border-radius: 6px; }}")
-        frame.setFixedWidth(170)
+        frame.setFixedWidth(119)
         v = QVBoxLayout(frame)
-        v.setContentsMargins(8, 6, 8, 6)
-        v.setSpacing(4)
+        v.setContentsMargins(6, 6, 6, 6)
+        v.setSpacing(3)
         name = QLabel(title)
         name.setStyleSheet(f"color: {accent}; font-weight: 700; border: none;")
         v.addWidget(name)
-        row = QHBoxLayout()
-        row.setSpacing(4)
+
+        controls = QHBoxLayout()
+        controls.setSpacing(4)
         icon = QLabel("🔊")
         icon.setStyleSheet("border: none;")
-        row.addWidget(icon)
-        vol = QSlider(Qt.Horizontal)
+        icon.setAlignment(Qt.AlignHCenter)
+        volume_column = QVBoxLayout()
+        volume_column.setSpacing(0)
+        volume_column.addWidget(icon)
+        vol = QSlider(Qt.Vertical)
         vol.setRange(0, 200)
         vol.setValue(100)
-        row.addWidget(vol, 1)
+        vol.setFixedSize(20, 64)
+        vol.setAccessibleName(f"{title} 볼륨")
+        volume_column.addWidget(vol, 1, Qt.AlignHCenter)
+        controls.addLayout(volume_column, 1)
+
+        buttons_column = QVBoxLayout()
+        buttons_column.setSpacing(4)
         mute = QPushButton("M")
         mute.setCheckable(True)
         mute.setFixedWidth(28)
@@ -669,6 +677,7 @@ class AudioEditorPanel(QWidget):
             "QPushButton:checked { background: #DC2626; color: white; }"
             "QPushButton:hover { background: #D1D5DB; }"
         )
+        buttons_column.addWidget(mute)
         solo = QPushButton("S")
         solo.setCheckable(True)
         solo.setFixedWidth(28)
@@ -679,19 +688,32 @@ class AudioEditorPanel(QWidget):
             "QPushButton:checked { background: #F59E0B; color: #111827; }"
             "QPushButton:hover { background: #D1D5DB; }"
         )
-        row.addWidget(mute)
-        row.addWidget(solo)
-        v.addLayout(row)
-        info = QLabel("(없음)")
-        info.setProperty("textColor", "secondary")
-        v.addWidget(info)
+        buttons_column.addWidget(solo)
+        buttons_column.addStretch(1)
+        controls.addLayout(buttons_column)
+
+        height_column = QVBoxLayout()
+        height_column.setSpacing(0)
+        height_icon = QLabel("↕")
+        height_icon.setAlignment(Qt.AlignHCenter)
+        height_icon.setToolTip("트랙 높이 조절")
+        height_column.addWidget(height_icon)
         # 트랙 높이 조절 슬라이더
-        height = QSlider(Qt.Horizontal)
+        height = QSlider(Qt.Vertical)
         height.setRange(50, 400)
         height.setValue(140)
-        height.setFixedHeight(20)
+        height.setFixedSize(20, 64)
         height.setToolTip("트랙 높이 조절")
-        v.addWidget(height)
+        height.setAccessibleName(f"{title} 트랙 높이")
+        height_column.addWidget(height, 1, Qt.AlignHCenter)
+        controls.addLayout(height_column, 1)
+        v.addLayout(controls, 1)
+
+        info = None
+        if show_info:
+            info = QLabel("(없음)")
+            info.setProperty("textColor", "secondary")
+            v.addWidget(info)
         return frame, vol, mute, solo, info, height
 
     def _show_help(self):
@@ -905,10 +927,8 @@ class AudioEditorPanel(QWidget):
         setattr(self, f"_loading_path_{which}", None)
         if which == 1:
             self.path1 = path
-            self.label1.setText(f"보컬(1번): {os.path.basename(path)}")
         else:
             self.path2 = path
-            self.label2.setText(f"반주(2번): {os.path.basename(path)}")
         self._set_track(which, data, sr, f"불러옴: {os.path.basename(path)}")
         self.track_loaded.emit(which, path)
 
