@@ -10,7 +10,10 @@ for sp in site.getsitepackages():
 import stable_whisper
 import tempfile
 import os
+import threading
 from typing import Optional
+
+from starlette.concurrency import run_in_threadpool
 
 app = FastAPI(title="Local STT Server (stable-ts)")
 MAX_UPLOAD_BYTES = 2 * 1024**3
@@ -81,6 +84,23 @@ DEVICE = os.getenv("DEVICE", "cuda")
 print(f"[INFO] Loading stable-ts faster-whisper: {MODEL_NAME} ({COMPUTE_TYPE}) on {DEVICE} ...")
 model = stable_whisper.load_faster_whisper(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
 print("[INFO] Model loaded. Server ready.")
+_model_lock = threading.Lock()
+
+
+def _run_model(tmp_path, filtered_lyrics, language):
+    with _model_lock:
+        if filtered_lyrics:
+            return model.align(
+                tmp_path, filtered_lyrics, language=language, original_split=True
+            )
+        return model.transcribe_stable(
+            tmp_path,
+            language=language,
+            suppress_silence=True,
+            no_speech_threshold=0.6,
+            condition_on_previous_text=True,
+            temperature=0.0,
+        )
 
 
 @app.get("/health")
@@ -126,17 +146,14 @@ async def transcribe_audio(
             if not filtered_lyrics:
                 return {"error": "타이밍을 생성할 가사가 없습니다 (섹션 태그만 입력됨)."}
             # 사용자가 제공한 원본 가사를 오디오에 정렬 (Whisper 전사 대신)
-            result = model.align(tmp_path, filtered_lyrics, language=language, original_split=True)
+            result = await run_in_threadpool(
+                _run_model, tmp_path, filtered_lyrics, language
+            )
             if result is None:
                 return {"error": "가사 정렬에 실패했습니다."}
         else:
-            result = model.transcribe_stable(
-                tmp_path,
-                language=language,
-                suppress_silence=True,          # 무음 구간 억제로 정확도 향상
-                no_speech_threshold=0.6,        # 무음 판단 임계값 하향 (발화 민감도 ↑)
-                condition_on_previous_text=True,  # 이전 텍스트를 맥락으로 사용해 연속성 개선
-                temperature=0.0,                # 결정적 결과 선호 (싱크 안정성)
+            result = await run_in_threadpool(
+                _run_model, tmp_path, "", language
             )
 
         segments = []

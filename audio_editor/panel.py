@@ -9,7 +9,7 @@ import numpy as np
 import soundfile as sf
 
 from PySide6 import QtCore
-from PySide6.QtCore import Qt, QTimer, QSettings, Signal
+from PySide6.QtCore import Qt, QTimer, QSettings, Signal, Slot
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
@@ -143,6 +143,9 @@ class AudioEditorPanel(QWidget):
         self._curves = {}    # 플롯별 파형 커브 (clear() 대신 이것만 제거)
 
         self.history = []    # (which, data, sr)
+        self._load_workers = {}
+        self._load_request_ids = {1: 0, 2: 0}
+        self._shutting_down = False
         self._playback_engine = PlaybackEngine(self)
         self._player = self._playback_engine.player
         self._playback_engine.position_changed.connect(self._on_position_changed)
@@ -863,6 +866,8 @@ class AudioEditorPanel(QWidget):
 
     # ---------- 파일 ----------
     def open_track(self, which, path=None):
+        if self._shutting_down:
+            return
         if not path:
             last_dir = self._settings.value("last_open_dir", "")
             start = last_dir if last_dir else ""
@@ -874,17 +879,23 @@ class AudioEditorPanel(QWidget):
             return
         if path == getattr(self, f"_loading_path_{which}", None):
             return
+        self._load_request_ids[which] += 1
+        request_id = self._load_request_ids[which]
         setattr(self, f"_loading_path_{which}", path)
         if os.path.isdir(os.path.dirname(path)):
             self._settings.setValue("last_open_dir", os.path.dirname(path))
         self.progress.setVisible(True)
-        self._load_worker = _LoadTrackWorker(path, which)
-        self._load_worker.finished.connect(lambda data, sr, p, w=which: self._on_track_loaded(w, data, sr, p))
-        self._load_worker.failed.connect(lambda msg, w=which: self._on_track_load_failed(msg, w))
-        self._load_worker.start()
+        worker = _LoadTrackWorker(path, which, request_id)
+        self._load_workers[worker] = (which, request_id)
+        worker.loaded.connect(self._on_track_loaded)
+        worker.failed.connect(self._on_track_load_failed)
+        worker.finished.connect(self._on_load_worker_finished)
+        worker.start()
 
-    def _on_track_loaded(self, which, data, sr, path):
-        self.progress.setVisible(False)
+    @Slot(object, object, str, int, int)
+    def _on_track_loaded(self, data, sr, path, which, request_id):
+        if self._shutting_down or request_id != self._load_request_ids[which]:
+            return
         setattr(self, f"_loading_path_{which}", None)
         if which == 1:
             self.path1 = path
@@ -895,12 +906,18 @@ class AudioEditorPanel(QWidget):
         self._set_track(which, data, sr, f"불러옴: {os.path.basename(path)}")
         self.track_loaded.emit(which, path)
 
-    def _on_track_load_failed(self, msg, which=None):
-        self.progress.setVisible(False)
-        if which is not None:
-            setattr(self, f"_loading_path_{which}", None)
-            self.track_load_failed.emit(which, msg)
+    @Slot(str, int, int)
+    def _on_track_load_failed(self, msg, which, request_id):
+        if self._shutting_down or request_id != self._load_request_ids[which]:
+            return
+        setattr(self, f"_loading_path_{which}", None)
+        self.track_load_failed.emit(which, msg)
         QMessageBox.critical(self, "오류", f"파일을 열 수 없습니다:\n{msg}")
+
+    @Slot()
+    def _on_load_worker_finished(self):
+        self._load_workers.pop(self.sender(), None)
+        self.progress.setVisible(bool(self._load_workers))
 
     def save_track(self, which):
         """1번(보컬) 또는 2번(반주) 트랙을 그대로 따로 저장한다."""
@@ -1745,6 +1762,17 @@ class AudioEditorPanel(QWidget):
         super().keyPressEvent(ev)
 
     def shutdown(self):
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        for which in (1, 2):
+            self._load_request_ids[which] += 1
+            setattr(self, f"_loading_path_{which}", None)
+        workers = list(self._load_workers)
+        for worker in workers:
+            worker.wait()
+        self._load_workers.clear()
+        self.progress.setVisible(False)
         self._playback_engine.cleanup()
 
     def closeEvent(self, event):

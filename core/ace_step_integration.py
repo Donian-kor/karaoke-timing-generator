@@ -11,6 +11,7 @@ import os
 import shutil
 import sqlite3
 import datetime
+import tempfile
 
 
 def load_ace_songs(db_path: str) -> list:
@@ -56,47 +57,93 @@ def apply_lrc_to_ace(song_id: str, lrc: str, lyrics_text: str, media_dir: str, d
     }
     target = result["target"]
 
-    # 적용 전 백업 생성
-    if os.path.exists(target):
-        try:
+    temp_path = None
+    file_replaced = False
+    target_existed = os.path.exists(target)
+    conn = None
+    try:
+        descriptor, temp_path = tempfile.mkstemp(
+            prefix=f".{song_id}.", suffix=".lrc.tmp", dir=media_dir
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as f:
+            normalized_lrc = lrc.replace("\r\n", "\n").replace("\r", "\n")
+            f.write(normalized_lrc.replace("\n", "\r\n"))
+
+        if target_existed:
             shutil.copy2(target, target + ".bak")
             result["backup_created"] = True
-        except Exception:
-            pass
-    if os.path.exists(db_path):
-        try:
-            shutil.copy2(db_path, db_path + ".bak")
-        except Exception:
-            pass
 
-    with open(target, "w", encoding="utf-8", newline="") as f:
-        f.write(lrc.replace("\n", "\r\n"))
+        if os.path.exists(db_path):
+            backup_conn = None
+            try:
+                conn = sqlite3.connect(db_path, timeout=10)
+                backup_conn = sqlite3.connect(db_path + ".bak")
+                conn.backup(backup_conn)
+            finally:
+                if backup_conn is not None:
+                    backup_conn.close()
 
-    # ACE-Step Studio는 metadata_json의 "lrc" 필드를 읽습니다.
-    db_updated = False
-    lyrics_saved = False
-    if os.path.exists(db_path):
-        try:
-            conn = sqlite3.connect(db_path, timeout=10)
-            cur = conn.cursor()
-            row = cur.execute("SELECT metadata_json FROM songs WHERE id=?", (song_id,)).fetchone()
-            if row is not None:
-                meta = json.loads(row[0]) if row[0] else {}
-                meta["lrc"] = lrc
-                if lyrics_text.strip():
-                    cur.execute(
-                        "UPDATE songs SET metadata_json=?, lyrics=?, updated_at=? WHERE id=?",
-                        (json.dumps(meta, ensure_ascii=False), lyrics_text, datetime.datetime.now().isoformat(), song_id),
-                    )
-                    lyrics_saved = True
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT metadata_json FROM songs WHERE id=?", (song_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"선택한 곡을 데이터베이스에서 찾을 수 없습니다: {song_id}")
+            meta = json.loads(row[0]) if row[0] else {}
+            if not isinstance(meta, dict):
+                raise ValueError("곡의 metadata_json 형식이 올바르지 않습니다.")
+            meta["lrc"] = lrc
+            if lyrics_text.strip():
+                cursor = conn.execute(
+                    "UPDATE songs SET metadata_json=?, lyrics=?, updated_at=? WHERE id=?",
+                    (
+                        json.dumps(meta, ensure_ascii=False),
+                        lyrics_text,
+                        datetime.datetime.now().isoformat(),
+                        song_id,
+                    ),
+                )
+                result["lyrics_saved"] = cursor.rowcount == 1
+            else:
+                conn.execute(
+                    "UPDATE songs SET metadata_json=? WHERE id=?",
+                    (json.dumps(meta, ensure_ascii=False), song_id),
+                )
+        os.replace(temp_path, target)
+        temp_path = None
+        file_replaced = True
+
+        if conn is not None:
+            conn.commit()
+            result["db_updated"] = True
+        result["lyrics_saved"] = bool(result["lyrics_saved"])
+        return result
+    except Exception as error:
+        rollback_error = None
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error as rollback_failure:
+                rollback_error = rollback_failure
+        if file_replaced:
+            try:
+                if target_existed:
+                    restore_path = target + ".restore"
+                    shutil.copy2(target + ".bak", restore_path)
+                    os.replace(restore_path, target)
                 else:
-                    cur.execute("UPDATE songs SET metadata_json=? WHERE id=?", (json.dumps(meta, ensure_ascii=False), song_id))
-                conn.commit()
-                db_updated = True
+                    os.remove(target)
+            except OSError as restore_error:
+                raise RuntimeError(
+                    f"LRC 저장 실패 후 이전 파일을 복원하지 못했습니다: {restore_error}"
+                ) from error
+        if rollback_error is not None:
+            raise RuntimeError(
+                f"데이터베이스 변경을 되돌리지 못했습니다: {rollback_error}"
+            ) from error
+        raise
+    finally:
+        if conn is not None:
             conn.close()
-        except Exception:
-            pass
-
-    result["db_updated"] = db_updated
-    result["lyrics_saved"] = lyrics_saved
-    return result
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)

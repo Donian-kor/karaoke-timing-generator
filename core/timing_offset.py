@@ -18,23 +18,26 @@ def shift_ts(text: str, ms: int) -> str:
         ss = int(m.group(2))
         cc = m.group(3)
         if len(cc) >= 3:
-            frac = int(cc) / 1000.0
+            total_ms = (mm * 60 + ss) * 1000 + int(cc) + ms
+            total_ms = max(0, total_ms)
+            minutes, remainder_ms = divmod(total_ms, 60_000)
+            seconds, milliseconds = divmod(remainder_ms, 1000)
+            return (
+                f"{open_c}{minutes:02d}:{seconds:02d}."
+                f"{milliseconds:03d}{close_c}"
+            )
         else:
-            frac = int(cc) / 100.0
-        total = mm * 60 + ss + frac + ms / 1000.0
-        if total < 0:
-            total = 0.0
-        nm = int(total // 60)
-        nrest = total % 60
-        ns = int(nrest)
-        if len(cc) >= 3:
-            ncs = int(round((nrest - ns) * 1000))
-            return f"{open_c}{nm:02d}:{ns:02d}.{ncs:03d}{close_c}"
-        else:
-            ncs = int(round((nrest - ns) * 100))
-            if ncs >= 100:
-                ncs = 99
-            return f"{open_c}{nm:02d}:{ns:02d}.{ncs:02d}{close_c}"
+            total_ms = (mm * 60 + ss) * 1000 + int(cc) * 10 + ms
+            total_ms = max(0, total_ms)
+            total_cs, remainder_ms = divmod(total_ms, 10)
+            if remainder_ms > 5 or (remainder_ms == 5 and total_cs % 2):
+                total_cs += 1
+            minutes, remainder_cs = divmod(total_cs, 6_000)
+            seconds, centiseconds = divmod(remainder_cs, 100)
+            return (
+                f"{open_c}{minutes:02d}:{seconds:02d}."
+                f"{centiseconds:02d}{close_c}"
+            )
     text = re.sub(r"\[(\d+):(\d+)\.(\d+)\]", lambda m: shift(m, "[", "]"), text)
     text = re.sub(r"<(\d+):(\d+)\.(\d+)>", lambda m: shift(m, "<", ">"), text)
     return text

@@ -3,6 +3,7 @@ import sys
 import subprocess
 import time
 import difflib
+import html
 import sqlite3
 import json
 import shutil
@@ -631,6 +632,10 @@ class MainWindow(QWidget):
                 "포트 8000에서 서버가 이미 실행 중입니다. 기존 서버를 종료하지 않았습니다."
             )
             self._update_server_btn()
+            if self._pending_generate:
+                self._pending_generate = False
+                self.lyrics_section.set_generating(False)
+                QTimer.singleShot(0, self.generate)
             return
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -657,15 +662,25 @@ class MainWindow(QWidget):
                 self._pending_generate = False
                 QTimer.singleShot(0, self.generate)
         else:
+            pending_generate = self._pending_generate
             self._pending_generate = False
             self.server_proc = None
+            if pending_generate:
+                self.progress.setVisible(False)
+                self.lyrics_section.set_generating(False)
             if msg:
                 self.status_label.setText(msg)
                 QMessageBox.warning(self, "서버", msg)
+            elif pending_generate:
+                self.status_label.setText("서버 시작에 실패해 타이밍 생성을 취소했습니다.")
         self._update_server_btn()
 
     def stop_server(self):
+        pending_generate = self._pending_generate
         self._pending_generate = False
+        if pending_generate:
+            self.progress.setVisible(False)
+            self.lyrics_section.set_generating(False)
         # 워커가 실행 중이면 종료
         if hasattr(self, "_start_worker") and self._start_worker is not None and self._start_worker.isRunning():
             try:
@@ -782,6 +797,11 @@ class MainWindow(QWidget):
         """생성/취소 토글 버튼 클릭 시 호출된다."""
         if self.worker is not None and self.worker.isRunning():
             self.cancel_generation()
+        elif self._pending_generate:
+            self._pending_generate = False
+            self.progress.setVisible(False)
+            self.lyrics_section.set_generating(False)
+            self.status_label.setText("생성 취소됨")
         else:
             self.generate()
 
@@ -1073,12 +1093,16 @@ class MainWindow(QWidget):
             start, end, words, full = self._preview_parsed[idx]
             parts = []
             for (wstart, wend, wtext) in words:
+                escaped_word = html.escape(wtext, quote=True)
                 if wstart <= pos < wend:
-                    parts.append(f'<span style="color:{self._color_state["current"]}; font-weight:800; text-decoration:underline;">{wtext}</span>')
+                    color = html.escape(self._color_state["current"], quote=True)
+                    parts.append(f'<span style="color:{color}; font-weight:800; text-decoration:underline;">{escaped_word}</span>')
                 elif pos >= wend:
-                    parts.append(f'<span style="color:{self._color_state["past"]};">{wtext}</span>')
+                    color = html.escape(self._color_state["past"], quote=True)
+                    parts.append(f'<span style="color:{color};">{escaped_word}</span>')
                 else:
-                    parts.append(f'<span style="color:{self._color_state["future"]};">{wtext}</span>')
+                    color = html.escape(self._color_state["future"], quote=True)
+                    parts.append(f'<span style="color:{color};">{escaped_word}</span>')
             self.preview_section.preview_lyric_label.setText(" ".join(parts))
         pass
 
@@ -1293,40 +1317,57 @@ class MainWindow(QWidget):
             return
         old_lines = original_text.splitlines()
         new_lines = edited_text.splitlines()
-        result_lines = []
-        for i, new_line in enumerate(new_lines):
-            old_line = old_lines[i] if i < len(old_lines) else None
-            delta = 0.0
-            if old_line is not None:
-                m_old = re.match(r"\s*\[(\d+):(\d+)\.(\d+)\]", old_line)
-                m_new = re.match(r"\s*\[(\d+):(\d+)\.(\d+)\]", new_line)
-                if m_old and m_new:
-                    def to_sec(m):
-                        mm, ss, cc = m.groups()
-                        frac = int(cc) / 1000.0 if len(cc) >= 3 else int(cc) / 100.0
-                        return int(mm) * 60 + int(ss) + frac
-                    delta = to_sec(m_new) - to_sec(m_old)
-            if delta != 0:
-                def shift_word(m):
-                    mm, ss, cc = m.groups()
-                    frac = int(cc) / 1000.0 if len(cc) >= 3 else int(cc) / 100.0
-                    total = int(mm) * 60 + int(ss) + frac + delta
-                    if total < 0:
-                        total = 0.0
-                    nm = int(total // 60)
-                    nr = total % 60
-                    ns = int(nr)
-                    nf = nr - ns
-                    if len(cc) >= 3:
-                        ncs = int(round(nf * 1000))
-                        return f"<{nm:02d}:{ns:02d}.{ncs:03d}>"
-                    else:
-                        ncs = int(round(nf * 100))
-                        if ncs >= 100:
-                            ncs = 99
-                        return f"<{nm:02d}:{ns:02d}.{ncs:02d}>"
-                new_line = re.sub(r"<(\d+):(\d+)\.(\d+)>", shift_word, new_line)
-            result_lines.append(new_line)
+        line_pattern = re.compile(r"^\s*\[(\d+):(\d+)\.(\d+)\](.*)$")
+        old_entries = []
+        new_entries = []
+        for index, line in enumerate(old_lines):
+            match = line_pattern.match(line)
+            if match:
+                old_entries.append((index, match))
+        for index, line in enumerate(new_lines):
+            match = line_pattern.match(line)
+            if match:
+                new_entries.append((index, match))
+
+        old_bodies = [match.group(4) for _, match in old_entries]
+        new_bodies = [match.group(4) for _, match in new_entries]
+        matching = difflib.SequenceMatcher(
+            a=old_bodies, b=new_bodies, autojunk=False
+        )
+        matched_old = {}
+        for tag, old_start, old_end, new_start, new_end in matching.get_opcodes():
+            if tag == "equal":
+                for offset in range(old_end - old_start):
+                    matched_old[new_entries[new_start + offset][0]] = (
+                        old_entries[old_start + offset][1]
+                    )
+
+        result_lines = list(new_lines)
+        for index, new_match in new_entries:
+            old_match = matched_old.get(index)
+            if old_match is None:
+                continue
+
+            def to_ms(match):
+                mm, ss, fraction = match.groups()[:3]
+                fraction_ms = (
+                    int(fraction)
+                    if len(fraction) >= 3
+                    else int(fraction) * 10
+                )
+                return (int(mm) * 60 + int(ss)) * 1000 + fraction_ms
+
+            delta_ms = to_ms(new_match) - to_ms(old_match)
+            if delta_ms:
+                result_lines[index] = re.sub(
+                    r"<(\d+):(\d+)\.(\d+)>",
+                    lambda match: shift_ts(
+                        f"<{match.group(1)}:{match.group(2)}."
+                        f"{match.group(3)}>",
+                        delta_ms,
+                    ),
+                    result_lines[index],
+                )
         new_text = "\n".join(result_lines)
         if new_text != edited_text:
             self.preview.setPlainText(new_text)

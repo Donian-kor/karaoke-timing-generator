@@ -12,12 +12,10 @@ def fmt_ts(seconds: float) -> str:
     """초 단위 시간을 LRC 타임스탬프 형식(MM:SS.cc)으로 변환한다."""
     if seconds < 0:
         seconds = 0.0
-    m = int(seconds // 60)
-    s = int(seconds % 60)
-    cs = int(round((seconds % 1) * 100))
-    if cs >= 100:
-        cs = 99
-    return f"{m:02d}:{s:02d}.{cs:02d}"
+    total_cs = int(round(seconds * 100))
+    minutes, remainder_cs = divmod(total_cs, 6_000)
+    seconds, centiseconds = divmod(remainder_cs, 100)
+    return f"{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
 
 
 def build_standard_lrc(segments):
