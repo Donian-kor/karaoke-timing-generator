@@ -185,7 +185,7 @@ class MainWindow(QWidget):
         file_menu = menubar.addMenu("파일(&F)")
         file_menu.addAction("오디오 열기", self.browse_audio)
         file_menu.addAction(
-            "보컬 열기", lambda: self.audio_editor_panel.open_track(1)
+            "반주 열기", lambda: self.audio_editor_panel.open_track(2)
         )
         file_menu.addSeparator()
         file_menu.addAction("보컬 저장", self._panel_action("save_track", 1))
