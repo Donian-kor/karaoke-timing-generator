@@ -35,8 +35,6 @@ class SettingsSection(QFrame):
     cancel_clicked = Signal()
     audio_edit_clicked = Signal()
     denoise_clicked = Signal()
-    song_selected = Signal(int)
-    song_refresh_clicked = Signal()
     settings_changed = Signal()
 
     def __init__(self, parent=None):
@@ -143,28 +141,6 @@ class SettingsSection(QFrame):
         row.addStretch(1)
         self._content_layout.addLayout(row)
 
-        # 3행: ACE-Step 곡 선택
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addWidget(QLabel("ACE-Step 곡:"))
-        self.song_combo = QComboBox()
-        self.song_combo.setStyleSheet(
-            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
-            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
-        )
-        self.song_combo.addItem("(직접 입력)")
-        # 긴 곡 제목이 콤보박스/섹션의 권장 크기를 과도하게 키우지 않도록 조정
-        self.song_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.song_combo.setMinimumContentsLength(12)
-        row.addWidget(self.song_combo, 1)
-        btn_refresh = QPushButton("새로고침")
-        btn_refresh.setMinimumWidth(100)
-        btn_refresh.setProperty("secondary", True)
-        btn_refresh.clicked.connect(lambda: self.song_refresh_clicked.emit())
-        row.addWidget(btn_refresh)
-        self._content_layout.addLayout(row)
-        self.song_combo.currentIndexChanged.connect(lambda idx: self.song_selected.emit(idx))
-
         # 4행: 진행률 표시
         row = QHBoxLayout()
         self.progress = QProgressBar()
@@ -194,19 +170,3 @@ class SettingsSection(QFrame):
 
     def get_audio_path(self) -> str:
         return self.audio_edit.text().strip()
-
-    def add_song_item(self, text: str, data=None) -> None:
-        self.song_combo.addItem(text, data)
-
-    def clear_songs(self) -> None:
-        self.song_combo.clear()
-        self.song_combo.addItem("(직접 입력)")
-
-    def set_song_index(self, index: int) -> None:
-        self.song_combo.setCurrentIndex(index)
-
-    def get_song_data(self):
-        return self.song_combo.currentData()
-
-    def get_song_text(self) -> str:
-        return self.song_combo.currentText()

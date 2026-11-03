@@ -14,7 +14,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
     QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox, QMenuBar,
-    QWidget,
+    QWidget, QSizePolicy,
 )
 from PySide6.QtMultimedia import QMediaPlayer
 
@@ -139,6 +139,7 @@ class AudioEditorPanel(QWidget):
         self.path2 = None
         self.result = None   # 믹싱 결과
         self.result_sr = None
+        self._waveforms_visible = True
         self._curves = {}    # 플롯별 파형 커브 (clear() 대신 이것만 제거)
 
         self.history = []    # (which, data, sr)
@@ -293,39 +294,52 @@ class AudioEditorPanel(QWidget):
         btn_keep.setToolTip("선택 구간만 남기기")
         btn_keep.clicked.connect(self.trim_keep)
         btn_keep.setProperty("success", True)
-        toolbar.addWidget(btn_keep)
+        btn_keep.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_keep.setMinimumWidth(30)
+        toolbar.addWidget(btn_keep, 1)
         btn_export = QPushButton("구간 내보내기")
         btn_export.setToolTip("선택 구간을 새 오디오 파일로 내보내기")
         btn_export.clicked.connect(self.trim_export_selected)
         btn_export.setProperty("success", True)
-        toolbar.addWidget(btn_export)
+        btn_export.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_export.setMinimumWidth(30)
+        toolbar.addWidget(btn_export, 1)
         btn_norm = QPushButton("정규화")
         btn_norm.setToolTip("볼륨 최대치에 맞춰 정규화")
         btn_norm.clicked.connect(self.normalize_track)
         btn_norm.setProperty("success", True)
-        toolbar.addWidget(btn_norm)
+        btn_norm.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_norm.setMinimumWidth(30)
+        toolbar.addWidget(btn_norm, 1)
         btn_fade = QPushButton("페이드")
         btn_fade.setToolTip("페이드 인/아웃 적용")
         btn_fade.clicked.connect(self.fade_in_out)
         btn_fade.setProperty("success", True)
-        toolbar.addWidget(btn_fade)
+        btn_fade.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_fade.setMinimumWidth(30)
+        toolbar.addWidget(btn_fade, 1)
         btn_loop = QPushButton("구간 반복")
         btn_loop.setToolTip("선택 구간 반복 재생")
         btn_loop.clicked.connect(self.loop_play)
         btn_loop.setProperty("success", True)
-        toolbar.addWidget(btn_loop)
+        btn_loop.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_loop.setMinimumWidth(30)
+        toolbar.addWidget(btn_loop, 1)
         btn_mix = QPushButton("믹스 미리보기")
         btn_mix.setToolTip("반주와 보컬 믹싱 미리보기")
         btn_mix.clicked.connect(self.mix_tracks)
-        toolbar.addWidget(btn_mix)
+        btn_mix.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_mix.setMinimumWidth(30)
+        toolbar.addWidget(btn_mix, 1)
 
         btn_save_res = QPushButton("믹스 미리보기 저장")
         btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
         btn_save_res.clicked.connect(self.save_result)
         btn_save_res.setProperty("secondary", True)
-        toolbar.addWidget(btn_save_res)
+        btn_save_res.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_save_res.setMinimumWidth(30)
+        toolbar.addWidget(btn_save_res, 1)
 
-        toolbar.addStretch(1)
         self.status = QLabel("")
         toolbar.addWidget(self.status)
         layout.addWidget(self.toolbar_frame)
@@ -458,11 +472,8 @@ class AudioEditorPanel(QWidget):
         self.header2.setVisible(False)
         self._grid.setRowStretch(1, 0)
 
-        # 재생 슬라이더와 재생 시간 표기는 파형 그래프 아래에 배치한다.
-        play_row = QHBoxLayout()
-        play_row.addWidget(self.play_slider, 1)
-        play_row.addWidget(self.time_label)
-        layout.addLayout(play_row)
+        # 재생 슬라이더와 시간 표기를 '두 트랙 함께 선택' 체크박스 우측에 배치한다.
+        # (아래에서 target_row에 추가)
 
         # 선택 구간 (region)
         self.region1 = pg.LinearRegionItem([0, 1], brush=(59, 130, 246, 70), pen=pg.mkPen("#1d4ed8", width=1))
@@ -509,12 +520,20 @@ class AudioEditorPanel(QWidget):
 
         # 편집 대상 선택
         target_row = QHBoxLayout()
-        target_row.addWidget(QLabel("편집 대상 트랙:"))
+        # 편집 대상 트랙 선택 UI는 화면에서 숨기고,
+        # 편집 대상은 파형을 클릭하거나 '두 트랙 함께 선택'으로 정한다.
+        self._target_label = QLabel("편집 대상 트랙:")
+        self._target_label.setVisible(False)
+        target_row.addWidget(self._target_label)
         self.combo_target = QComboBox()
         self.combo_target.addItems(["반주 (1번)", "보컬 (2번)"])
         self.combo_target.currentIndexChanged.connect(self._on_target_changed)
+        self.combo_target.setVisible(False)
         target_row.addWidget(self.combo_target)
         target_row.addWidget(self.chk_link_selection)
+        target_row.addWidget(self.play_slider, 1)
+        target_row.addWidget(self.time_label)
+        self._target_row = target_row
         target_row.addStretch(1)
         self.lbl_selection = QLabel("선택 구간: 드래그로 선택하세요")
         self.lbl_selection.setProperty("accent", True)
@@ -533,6 +552,69 @@ class AudioEditorPanel(QWidget):
         # 초기 편집 대상 트랙 강조
         self._update_target_highlight()
 
+
+    def insert_denoise_before_keep(self, btn_denoise):
+        """잡음 제거 버튼을 툴바에서 '선택 구간만 남기기' 버튼 앞에 배치한다."""
+        from PySide6.QtWidgets import QSizePolicy
+        btn_denoise.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn_denoise.setMinimumWidth(30)
+        idx = self._top_toolbar.indexOf(self.trim_buttons[0])  # btn_keep
+        if idx < 0:
+            idx = self._top_toolbar.count()
+        self._top_toolbar.insertWidget(idx, btn_denoise, 1)
+
+    def set_waveforms_visible(self, visible):
+        """파형 그래프(트랙)만 숨기고/표시한다. 툴바·target_row·체크박스는 항상 유지한다."""
+        self._waveforms_visible = visible
+        # 1번 트랙(반주)은 파형 표시 ON 시 항상 표시
+        self.plot1.setVisible(visible)
+        self.header1.setVisible(visible)
+        # 2번 트랙은 데이터가 불러와진 경우에만 표시
+        if visible:
+            self.plot2.setVisible(self.track2 is not None)
+            self.header2.setVisible(self.track2 is not None)
+        else:
+            self.plot2.setVisible(False)
+            self.header2.setVisible(False)
+        # 3번 트랙은 믹싱 결과가 있는 경우에만 표시
+        if visible:
+            self.plot3.setVisible(self.result is not None)
+            self.header3.setVisible(self.result is not None)
+        else:
+            self.plot3.setVisible(False)
+            self.header3.setVisible(False)
+        # 자막 레인도 파형과 함께 숨긴다.
+        if hasattr(self, 'sub_lane'):
+            self.sub_lane.setVisible(visible and self.sub_lane.isVisible())
+        # 행 스트레치 조정
+        self._grid.setRowStretch(0, 1 if visible else 0)
+        self._grid.setRowStretch(1, 1 if (visible and self.track2 is not None) else 0)
+        self._grid.setRowStretch(2, 0)
+
+    def insert_waveform_checkbox(self, chk_waveform_visible):
+        """'파형 표시' 체크박스를 '두 트랙 함께 선택' 바로 왼쪽에 배치한다."""
+        idx = self._target_row.indexOf(self.chk_link_selection)
+        if idx < 0:
+            idx = self._target_row.count()
+        self._target_row.insertWidget(idx, chk_waveform_visible)
+
+    def insert_play_stop_controls(self, btn_play_toggle, btn_stop):
+        """재생/정지 버튼을 target_row의 play_slider 바로 왼쪽에 배치한다."""
+        idx = self._target_row.indexOf(self.play_slider)
+        if idx < 0:
+            idx = self._target_row.count()
+        self._target_row.insertWidget(idx, btn_play_toggle)
+        self._target_row.insertWidget(idx + 1, btn_stop)
+
+    def insert_speed_color_controls(self, speed_label, speed_combo, color_label, color_combo):
+        """속도/색상 컨트롤을 target_row의 스트레치 앞(슬라이더/시간 라벨 우측)에 배치한다."""
+        # lbl_selection(선택 구간 라벨) 바로 앞에 삽입한다.
+        idx = self._target_row.indexOf(self.lbl_selection)
+        if idx < 0:
+            idx = self._target_row.count()
+        for widget in (speed_label, speed_combo, color_label, color_combo):
+            self._target_row.insertWidget(idx, widget)
+            idx += 1
 
     def take_toolbar(self):
         """툴바 프레임을 패널에서 분리하여 반환한다 (karaoke_gui에서 상단에 배치용)."""
@@ -651,8 +733,11 @@ class AudioEditorPanel(QWidget):
     def set_compact_mode(self, compact=True):
         self.menu_bar.setVisible(not compact)
         self.toolbar_frame.setVisible(not compact)
-        self.play_slider.setVisible(not compact)
-        for control in self._compact_transport_controls:
+        self.play_slider.setVisible(True)
+        self.time_label.setVisible(True)
+        # 재생/정지/상태 라벨은 메인 툴바와 중복되므로 숨긴다.
+        for control in (x for x in self._compact_transport_controls
+                        if x not in (self.play_slider, self.time_label)):
             control.setVisible(not compact)
         for control in self._compact_duplicate_controls:
             control.setVisible(not compact)
@@ -704,9 +789,10 @@ class AudioEditorPanel(QWidget):
             if self.track2 is not None:
                 dur = len(self.track2) / self.sr2
                 self.region2.setRegion((0, min(1.0, dur)))
-                self.plot2.setVisible(True)
-                self.header2.setVisible(True)
-                self._grid.setRowStretch(1, 1)
+                if self._waveforms_visible:
+                    self.plot2.setVisible(True)
+                    self.header2.setVisible(True)
+                self._grid.setRowStretch(1, 1 if (self._waveforms_visible and self.track2 is not None) else 0)
             else:
                 self.plot2.setVisible(False)
                 self.header2.setVisible(False)
@@ -1634,8 +1720,8 @@ class AudioEditorPanel(QWidget):
         self.result_sr = self.sr1
         # 결과 플롯 표시 (미리보기 전용: 원본 track1/track2는 변경하지 않는다)
         self._plot_track(self.plot3, mixed, self.result_sr, "믹싱 미리보기 (저장용 아님)")
-        self.plot3.setVisible(True)
-        self.header3.setVisible(True)
+        self.plot3.setVisible(self._waveforms_visible)
+        self.header3.setVisible(self._waveforms_visible)
         self._grid.setRowStretch(2, 1)
         self.info3.setText(f"길이 {len(mixed)/self.result_sr:.2f}초")
         self.status.setText("믹싱 완료 — 미리보기일 뿐, 원본 트랙은 그대로 유지됩니다")

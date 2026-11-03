@@ -59,16 +59,17 @@ class PreviewSection(QFrame):
             "padding: 12px 16px; border-radius: 8px; border: 1px solid #475569;"
         )
 
-    def move_controls_to(self, layout):
-        self._content_layout.removeWidget(self.preview_time_label)
-        self._content_layout.removeWidget(self.preview_slider)
-        self._content_layout.removeItem(self._controls_row)
+    def take_play_stop_controls(self):
+        """재생/정지 버튼을 _controls_row에서 분리해 반환한다."""
+        controls = (self.btn_play_toggle, self.btn_stop)
+        for control in controls:
+            self._controls_row.removeWidget(control)
+            control.setParent(None)
+        return controls
 
+    def take_speed_color_controls(self):
+        """속도/색상 컨트롤을 _controls_row에서 분리해 반환한다."""
         controls = (
-            self.btn_play_toggle,
-            self.btn_stop,
-            self.preview_time_label,
-            self.preview_slider,
             self.speed_label,
             self.speed_combo,
             self.color_label,
@@ -76,10 +77,14 @@ class PreviewSection(QFrame):
         )
         for control in controls:
             self._controls_row.removeWidget(control)
-            if control is self.preview_slider:
-                layout.addWidget(control, 1)
-            else:
-                layout.addWidget(control)
+            control.setParent(None)
+        return controls
+
+    def move_controls_to(self, layout):
+        """하위 호환용 — 이제 각 컨트롤을 개별적으로 이동하므로 아무 동작도 하지 않는다."""
+        # 메인 툴바에 재생 슬라이더/시간/재생 정지/속도/색상을 두 번 표시하지 않도록
+        # 모두 preview_section에서 분리해 target_row로 이동한다.
+        return
 
         self.preview_time_label.setMinimumWidth(112)
         self.preview_time_label.setMaximumWidth(132)

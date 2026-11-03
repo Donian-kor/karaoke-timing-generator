@@ -267,15 +267,12 @@ class MainWindow(QWidget):
         self.lang_combo = self.settings_section.lang_combo
         self.model_combo = self.settings_section.model_combo
         self.compute_combo = self.settings_section.compute_combo
-        self.song_combo = self.settings_section.song_combo
         self.progress = self.settings_section.progress
 
         # SettingsSection 시그널 연결
         self.settings_section.server_toggle_clicked.connect(self._on_server_toggle)
         self.settings_section.health_check_clicked.connect(self.check_health)
         self.settings_section.audio_browse_clicked.connect(self.browse_audio)
-        self.settings_section.song_selected.connect(self._on_song_selected)
-        self.settings_section.song_refresh_clicked.connect(self._load_ace_songs)
         self.settings_section.settings_changed.connect(self._save_settings)
         self.lang_combo.currentTextChanged.connect(lambda _: self._save_settings())
         self.model_combo.currentTextChanged.connect(lambda _: self._save_settings())
@@ -285,6 +282,9 @@ class MainWindow(QWidget):
 
         # 가사 / LRC 섹션 (LyricsSection 위젯)
         self.lyrics_section = LyricsSection()
+        self.song_combo = self.lyrics_section.song_combo
+        self.lyrics_section.song_selected.connect(self._on_song_selected)
+        self.lyrics_section.song_refresh_clicked.connect(self._load_ace_songs)
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
         self.lyrics_edit = self.lyrics_section.lyrics_edit
         self.preview = self.lyrics_section.preview
@@ -370,21 +370,31 @@ class MainWindow(QWidget):
             self.audio_editor_panel.take_vocal_open_button()
         )
         self.preview_section.move_controls_to(workspace_toolbar)
+        # 재생/정지 버튼을 재생 슬라이더 왼쪽으로 이동
+        btn_play_toggle, btn_stop = self.preview_section.take_play_stop_controls()
+        self.audio_editor_panel.insert_play_stop_controls(btn_play_toggle, btn_stop)
+        # 속도/색상 컨트롤을 재생 슬라이더 우측(target_row)으로 이동
+        speed_label, speed_combo, color_label, color_combo = self.preview_section.take_speed_color_controls()
+        self.audio_editor_panel.insert_speed_color_controls(speed_label, speed_combo, color_label, color_combo)
+        # 잡음 제거 버튼을 툴바의 '선택 구간만 남기기' 앞으로 이동
+        btn_denoise = self.lyrics_section.take_denoise()
+        self.audio_editor_panel.insert_denoise_before_keep(btn_denoise)
         workspace_layout.addLayout(workspace_toolbar)
 
-        offset_toolbar = QHBoxLayout()
-        offset_toolbar.setContentsMargins(4, 0, 4, 0)
-        offset_toolbar.setSpacing(6)
-        offset_toolbar.addStretch(1)
+        # '파형 표시' 체크박스를 패널의 '두 트랙 함께 선택' 왼쪽으로 이동
         self.chk_waveform_visible = QCheckBox("파형 표시")
-        self.chk_waveform_visible.setChecked(
-            self._settings.get("waveform_visible", True)
+        # 기본값은 항상 체크됨 (V 표시)
+        self.chk_waveform_visible.setChecked(True)
+        # 체크/해제 상태에 따라 글자 색상을 다르게 표시
+        self.chk_waveform_visible.setStyleSheet(
+            "QCheckBox { font-weight: 600; spacing: 6px; padding: 4px 2px; }"
+            "QCheckBox:checked { color: #0F766E; font-weight: 800; }"
+            "QCheckBox:unchecked { color: #94A3B8; }"
         )
         self.action_waveform_visible.setChecked(
             self.chk_waveform_visible.isChecked()
         )
-        offset_toolbar.addWidget(self.chk_waveform_visible)
-        workspace_layout.addLayout(offset_toolbar)
+        self.audio_editor_panel.insert_waveform_checkbox(self.chk_waveform_visible)
 
         # 오디오 편집기 툴바를 재생 미리보기 위로 이동
         self.audio_toolbar = self.audio_editor_panel.take_toolbar()
@@ -473,7 +483,7 @@ class MainWindow(QWidget):
             btn.setChecked(i == index)
 
     def _on_waveform_visibility_changed(self, visible):
-        self.audio_editor_panel.setVisible(visible)
+        self.audio_editor_panel.set_waveforms_visible(visible)
         workspace_height, lyrics_height = (504, 336) if visible else (130, 710)
         self.vsplitter.setSizes([workspace_height, lyrics_height])
 

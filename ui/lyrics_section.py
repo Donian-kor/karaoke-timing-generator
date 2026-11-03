@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """가사 / LRC 편집 섹션 위젯 (karaoke_gui.py에서 분리)."""
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QSplitter, QWidget,
-    QLabel, QPushButton, QTextEdit, QSpinBox,
+    QLabel, QPushButton, QTextEdit, QSpinBox, QComboBox, QSizePolicy,
 )
 
 
@@ -27,8 +27,16 @@ class LyricsSection(QFrame):
     line_offset_clicked = Signal()
     offset_clicked = Signal()
     gen_clicked = Signal()
+    server_toggle_clicked = Signal()
+    health_check_clicked = Signal()
+    audio_browse_clicked = Signal()
+    generate_clicked = Signal()
+    cancel_clicked = Signal()
     audio_edit_clicked = Signal()
     denoise_clicked = Signal()
+    song_selected = Signal(int)
+    song_refresh_clicked = Signal()
+    settings_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,11 +50,30 @@ class LyricsSection(QFrame):
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
-        # ── 제목 행 (제목 + 액션 버튼 우측 정렬) ──
+        # ── 제목 행 (ACE-Step 곡 선택 + 제목 + 액션 버튼 우측 정렬) ──
         title_row = QHBoxLayout()
         title = QLabel("가사 / LRC 편집")
         title.setProperty("sectionTitle", True)
         title_row.addWidget(title)
+
+        title_row.addSpacing(8)
+        title_row.addWidget(QLabel("ACE-Step 곡:"))
+        self.song_combo = QComboBox()
+        self.song_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
+        self.song_combo.addItem("(직접 입력)")
+        self.song_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.song_combo.setMinimumContentsLength(12)
+        self.song_combo.currentIndexChanged.connect(lambda idx: self.song_selected.emit(idx))
+        title_row.addWidget(self.song_combo, 1)
+        self.btn_refresh_song = QPushButton("새로고침")
+        self.btn_refresh_song.setMinimumWidth(100)
+        self.btn_refresh_song.setProperty("secondary", True)
+        self.btn_refresh_song.clicked.connect(lambda: self.song_refresh_clicked.emit())
+        title_row.addWidget(self.btn_refresh_song)
+
         title_row.addStretch(1)
 
         self.btn_gen = QPushButton("타이밍 생성")
@@ -56,14 +83,15 @@ class LyricsSection(QFrame):
             "border: none; border-radius: 4px; padding: 6px 16px; min-height: 28px; }"
             "QPushButton:hover { background-color: #6D28D9; }"
             "QPushButton:pressed { background-color: #5B21B6; padding-top: 7px; padding-bottom: 5px; }")
-        self.btn_gen.setFixedWidth(120)
-        title_row.addWidget(self.btn_gen)
+        self.btn_gen.setFixedWidth(480)  # 가로만 4배
 
+
+        # 잡음 제거 버튼은 메인 화면 툴바로 이동 (take_denoise로 분리)
         self.btn_denoise = QPushButton("잡음 제거")
         self.btn_denoise.clicked.connect(lambda: self.denoise_clicked.emit())
         self.btn_denoise.setProperty("secondary", True)
         self.btn_denoise.setFixedWidth(120)
-        title_row.addWidget(self.btn_denoise)
+        self.btn_denoise.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # 싱크 컨트롤 (노래 시작 자동 맞춤, 선택 줄 맞춤, 전체 줄 맞춤)을 제목 행 우측에 배치
         title_row.addSpacing(12)
@@ -166,8 +194,11 @@ class LyricsSection(QFrame):
         btns_layout.addWidget(self.btn_revert)
 
         btns_layout.addStretch(1)
+        # 타이밍 생성 버튼을 다른 버튼들과 같은 줄 우측 끝에 배치, 펄스 애니메이션 적용
+        btns_layout.addWidget(self.btn_gen)
         layout.addLayout(btns_layout)
         self._buttons_layout = btns_layout
+        self._start_gen_pulse()
 
     def move_offset_controls_to(self, layout):
         controls = (
@@ -184,16 +215,82 @@ class LyricsSection(QFrame):
     def set_generating(self, generating: bool) -> None:
         """생성 중 상태에 따라 버튼 텍스트와 색상을 토글한다."""
         if generating:
+            if hasattr(self, '_gen_pulse_timer'):
+                self._gen_pulse_timer.stop()
             self.btn_gen.setText("취소")
             self.btn_gen.setProperty("success", False)
             self.btn_gen.setProperty("danger", True)
-            self.btn_gen.setStyleSheet("")
+            self.btn_gen.setStyleSheet(
+                "QPushButton { background-color: #DC2626; color: white; font-weight: 800; "
+                "border: none; border-radius: 6px; padding: 6px 16px; min-height: 28px; }"
+                "QPushButton:hover { background-color: #B91C1C; }")
             self.btn_gen.style().unpolish(self.btn_gen)
             self.btn_gen.style().polish(self.btn_gen)
         else:
             self.btn_gen.setText("타이밍 생성")
             self.btn_gen.setProperty("danger", False)
             self.btn_gen.setProperty("success", True)
-            self.btn_gen.setStyleSheet("")
+            if hasattr(self, '_gen_pulse_timer'):
+                self._gen_pulse_timer.start()
+            self.btn_gen.setStyleSheet(
+                "QPushButton { background-color: #7C3AED; color: white; font-weight: 700; "
+                "border: 2px solid transparent; border-radius: 6px; padding: 6px 16px; min-height: 28px; }"
+                "QPushButton:hover { background-color: #6D28D9; }"
+                "QPushButton:pressed { background-color: #5B21B6; }")
             self.btn_gen.style().unpolish(self.btn_gen)
             self.btn_gen.style().polish(self.btn_gen)
+
+    def _start_gen_pulse(self):
+        """타이밍 생성 버튼에 테두리 글로우 펄스 애니메이션을 적용한다."""
+        self._gen_pulse_timer = QTimer(self)
+        self._gen_pulse_timer.setInterval(700)
+        self._gen_pulse_on = False
+
+        def _pulse():
+            self._gen_pulse_on = not self._gen_pulse_on
+            if self._gen_pulse_on:
+                self.btn_gen.setStyleSheet(
+                    "QPushButton { background-color: #7C3AED; color: white; font-weight: 800; "
+                    "border: 2px solid #A78BFA; border-radius: 6px; padding: 6px 16px; min-height: 28px; }"
+                    "QPushButton:hover { background-color: #6D28D9; }"
+                    "QPushButton:pressed { background-color: #5B21B6; }")
+            else:
+                self.btn_gen.setStyleSheet(
+                    "QPushButton { background-color: #7C3AED; color: white; font-weight: 700; "
+                    "border: 2px solid transparent; border-radius: 6px; padding: 6px 16px; min-height: 28px; }"
+                    "QPushButton:hover { background-color: #6D28D9; }"
+                    "QPushButton:pressed { background-color: #5B21B6; }")
+            self.btn_gen.style().unpolish(self.btn_gen)
+            self.btn_gen.style().polish(self.btn_gen)
+
+        self._gen_pulse_timer.timeout.connect(_pulse)
+        self._gen_pulse_timer.start()
+
+    # ---------- ACE-Step 곡 목록 ----------
+    def add_song_item(self, text: str, data=None) -> None:
+        self.song_combo.addItem(text, data)
+
+    def clear_songs(self) -> None:
+        self.song_combo.clear()
+        self.song_combo.addItem("(직접 입력)")
+
+    def set_song_index(self, index: int) -> None:
+        self.song_combo.setCurrentIndex(index)
+
+    def get_song_data(self):
+        return self.song_combo.currentData()
+
+    def get_song_text(self) -> str:
+        return self.song_combo.currentText()
+
+    # ---------- 잡음 제거 버튼 분리 ----------
+    def take_denoise(self):
+        """잡음 제거 버튼을 현재 위치에서 분리해 반환한다."""
+        btn = self.btn_denoise
+        parent = btn.parent()
+        if parent is not None:
+            layout = parent.layout()
+            if layout is not None:
+                layout.removeWidget(btn)
+        btn.setParent(None)
+        return btn
