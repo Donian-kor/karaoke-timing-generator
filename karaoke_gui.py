@@ -371,9 +371,11 @@ class MainWindow(QWidget):
             self.audio_editor_panel.take_instrumental_open_button()
         )
         self.preview_section.move_controls_to(workspace_toolbar)
-        # 재생/정지 버튼을 재생 슬라이더 왼쪽으로 이동
+        # 재생/정지/구간 반복 버튼을 재생 슬라이더 왼쪽에 순서대로 배치
         btn_play_toggle, btn_stop = self.preview_section.take_play_stop_controls()
-        self.audio_editor_panel.insert_play_stop_controls(btn_play_toggle, btn_stop)
+        self.audio_editor_panel.insert_play_stop_controls(
+            btn_play_toggle, btn_stop, self.audio_editor_panel.trim_buttons[4]
+        )
         # 속도/색상 컨트롤을 재생 슬라이더 우측(target_row)으로 이동
         speed_label, speed_combo, color_label, color_combo = self.preview_section.take_speed_color_controls()
         self.audio_editor_panel.insert_speed_color_controls(speed_label, speed_combo, color_label, color_combo)

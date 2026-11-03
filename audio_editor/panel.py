@@ -10,11 +10,11 @@ import soundfile as sf
 
 from PySide6 import QtCore
 from PySide6.QtCore import Qt, QTimer, QSettings, Signal, Slot
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QCursor, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFileDialog,
     QDoubleSpinBox, QSlider, QMessageBox, QProgressBar, QFrame, QComboBox, QCheckBox, QMenuBar,
-    QWidget, QSizePolicy,
+    QToolTip, QWidget, QSizePolicy,
 )
 from PySide6.QtMultimedia import QMediaPlayer
 
@@ -600,13 +600,15 @@ class AudioEditorPanel(QWidget):
             idx = self._target_row.count()
         self._target_row.insertWidget(idx, chk_waveform_visible)
 
-    def insert_play_stop_controls(self, btn_play_toggle, btn_stop):
-        """재생/정지 버튼을 target_row의 play_slider 바로 왼쪽에 배치한다."""
+    def insert_play_stop_controls(self, btn_play_toggle, btn_stop, btn_loop):
+        """재생/정지/구간 반복 버튼을 슬라이더 왼쪽에 순서대로 배치한다."""
+        self._top_toolbar.removeWidget(btn_loop)
         idx = self._target_row.indexOf(self.play_slider)
         if idx < 0:
             idx = self._target_row.count()
         self._target_row.insertWidget(idx, btn_play_toggle)
         self._target_row.insertWidget(idx + 1, btn_stop)
+        self._target_row.insertWidget(idx + 2, btn_loop)
 
     def insert_speed_color_controls(self, speed_label, speed_combo, color_label, color_combo):
         """속도/색상 컨트롤을 target_row의 스트레치 앞(슬라이더/시간 라벨 우측)에 배치한다."""
@@ -683,10 +685,20 @@ class AudioEditorPanel(QWidget):
         volume_row.addWidget(icon)
         vol = QSlider(Qt.Horizontal)
         vol.setObjectName("trackVolumeSlider")
-        vol.setRange(0, 200)
+        vol.setRange(0, 100)
         vol.setValue(100)
         vol.setFixedHeight(20)
         vol.setAccessibleName(f"{title} 볼륨")
+        vol.setToolTip(str(vol.value()))
+
+        def update_volume_tooltip(value):
+            vol.setToolTip(str(value))
+            if vol.isSliderDown() or vol.hasFocus():
+                QToolTip.showText(QCursor.pos(), str(value), vol)
+
+        vol.valueChanged.connect(update_volume_tooltip)
+        vol.sliderMoved.connect(update_volume_tooltip)
+        vol.sliderReleased.connect(QToolTip.hideText)
         volume_row.addWidget(vol, 1)
         v.addLayout(volume_row)
 
