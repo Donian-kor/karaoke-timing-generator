@@ -58,6 +58,10 @@ class PreviewSection(QFrame):
             "font-weight: 700; color: #FFFFFF; background-color: #000000; "
             "padding: 12px 16px; border-radius: 8px; border: 1px solid #475569;"
         )
+        # 재생 시간/슬라이더는 파형 편집기(target_row)로 이동했으므로
+        # 미리보기 밴드에서는 숨긴다 (로직용 참조는 유지).
+        self.preview_time_label.setVisible(False)
+        self.preview_slider.setVisible(False)
 
     def take_play_stop_controls(self):
         """재생/정지 버튼을 _controls_row에서 분리해 반환한다."""

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """PySide6 기반 간단 오디오 편집기 (멀티트랙 파형).
 
-Audacity처럼 반주/보컬 파형을 위아래로 분리해 보여주며,
+Audacity처럼 보컬/반주 파형을 위아래로 분리해 보여주며,
 구간 자르기, 잡음 제거, 믹싱을 처리합니다.
 """
 import os
@@ -131,10 +131,10 @@ class AudioEditorPanel(QWidget):
         super().__init__(parent)
 
         # 트랙 데이터
-        self.track1 = None   # 반주
+        self.track1 = None   # 보컬
         self.sr1 = None
         self.path1 = None
-        self.track2 = None   # 보컬
+        self.track2 = None   # 반주
         self.sr2 = None
         self.path2 = None
         self.result = None   # 믹싱 결과
@@ -206,14 +206,14 @@ class AudioEditorPanel(QWidget):
 
         # 파일 메뉴
         file_menu = menubar.addMenu("파일(F)")
-        act_open1 = file_menu.addAction("반주 열기(O)")
+        act_open1 = file_menu.addAction("보컬 열기(O)")
         act_open1.triggered.connect(lambda: self.open_track(1))
-        act_open2 = file_menu.addAction("보컬 열기(O)")
+        act_open2 = file_menu.addAction("반주 열기(O)")
         act_open2.triggered.connect(lambda: self.open_track(2))
         file_menu.addSeparator()
-        act_save1 = file_menu.addAction("1번 트랙 저장(S)")
+        act_save1 = file_menu.addAction("보컬(1번) 저장(S)")
         act_save1.triggered.connect(lambda: self.save_track(1))
-        act_save2 = file_menu.addAction("2번 트랙 저장(S)")
+        act_save2 = file_menu.addAction("반주(2번) 저장(S)")
         act_save2.triggered.connect(lambda: self.save_track(2))
         act_save_both = file_menu.addAction("두 트랙 따로 저장(B)")
         act_save_both.triggered.connect(self.save_both_tracks)
@@ -344,8 +344,8 @@ class AudioEditorPanel(QWidget):
         toolbar.addWidget(self.status)
         layout.addWidget(self.toolbar_frame)
         self._top_toolbar = toolbar
-        self.btn_open_vocal = btn_open2
-        self._compact_duplicate_controls = (btn_open1,)
+        self._compact_duplicate_controls = (btn_open2,)
+        self.btn_open_vocal = btn_open1
 
         # 재생 슬라이더와 시간 표기는 파형 그래프 아래로 이동 (아래에서 추가)
         self.time_label = QLabel("0.00 / 0.00")
@@ -526,7 +526,7 @@ class AudioEditorPanel(QWidget):
         self._target_label.setVisible(False)
         target_row.addWidget(self._target_label)
         self.combo_target = QComboBox()
-        self.combo_target.addItems(["반주 (1번)", "보컬 (2번)"])
+        self.combo_target.addItems(["보컬 (1번)", "반주 (2번)"])
         self.combo_target.currentIndexChanged.connect(self._on_target_changed)
         self.combo_target.setVisible(False)
         target_row.addWidget(self.combo_target)
@@ -566,7 +566,7 @@ class AudioEditorPanel(QWidget):
     def set_waveforms_visible(self, visible):
         """파형 그래프(트랙)만 숨기고/표시한다. 툴바·target_row·체크박스는 항상 유지한다."""
         self._waveforms_visible = visible
-        # 1번 트랙(반주)은 파형 표시 ON 시 항상 표시
+        # 1번 트랙(보컬)은 파형 표시 ON 시 항상 표시
         self.plot1.setVisible(visible)
         self.header1.setVisible(visible)
         # 2번 트랙은 데이터가 불러와진 경우에만 표시
@@ -744,6 +744,7 @@ class AudioEditorPanel(QWidget):
 
     def take_vocal_open_button(self):
         self._top_toolbar.removeWidget(self.btn_open_vocal)
+        self.btn_open_vocal.setVisible(True)
         return self.btn_open_vocal
 
     def _update_target_highlight(self):
@@ -887,10 +888,10 @@ class AudioEditorPanel(QWidget):
         setattr(self, f"_loading_path_{which}", None)
         if which == 1:
             self.path1 = path
-            self.label1.setText(f"반주(1번): {os.path.basename(path)}")
+            self.label1.setText(f"보컬(1번): {os.path.basename(path)}")
         else:
             self.path2 = path
-            self.label2.setText(f"보컬(2번): {os.path.basename(path)}")
+            self.label2.setText(f"반주(2번): {os.path.basename(path)}")
         self._set_track(which, data, sr, f"불러옴: {os.path.basename(path)}")
         self.track_loaded.emit(which, path)
 
@@ -902,7 +903,7 @@ class AudioEditorPanel(QWidget):
         QMessageBox.critical(self, "오류", f"파일을 열 수 없습니다:\n{msg}")
 
     def save_track(self, which):
-        """1번(반주) 또는 2번(보컬) 트랙을 그대로 따로 저장한다."""
+        """1번(보컬) 또는 2번(반주) 트랙을 그대로 따로 저장한다."""
         if which == 1:
             data, sr, src_path, name = self.track1, self.sr1, self.path1, "보컬"
         else:
@@ -1417,7 +1418,7 @@ class AudioEditorPanel(QWidget):
                 new_data[i0:i1] = 0
             else:
                 new_data[i0:i1, :] = 0
-            name = "반주" if which == 1 else "보컬"
+            name = "보컬" if which == 1 else "반주"
             self._set_track(which, new_data, sr, f"{name} 구간 {s:.3f}~{e:.3f}초 음소거 (길이 {len(data)/sr:.2f}초 유지)")
         for which in targets:
             self._region_for_track(which).setRegion((s, e))
@@ -1484,7 +1485,7 @@ class AudioEditorPanel(QWidget):
         segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
         # 원본 파일명 기준으로 기본 이름 생성
         src_path = self.path1 if which == 1 else self.path2
-        name = "반주" if which == 1 else "보컬"
+        name = "보컬" if which == 1 else "반주"
         if src_path:
             base = os.path.splitext(os.path.basename(src_path))[0]
             default = f"{base}_{name}_선택구간_{s:.3f}~{e:.3f}초.wav"
@@ -1561,7 +1562,7 @@ class AudioEditorPanel(QWidget):
             return
         segment = data[i0:i1] if np.ndim(data) == 1 else data[i0:i1, :]
         self._clipboard = (which, segment.copy(), sr)
-        name = "반주" if which == 1 else "보컬"
+        name = "보컬" if which == 1 else "반주"
         self.status.setText(f"클립보드 복사: {name} {s:.3f}~{e:.3f}초 ({i1-i0} 샘플)")
 
     def paste_clipboard(self):
@@ -1569,23 +1570,28 @@ class AudioEditorPanel(QWidget):
         if self._clipboard is None:
             QMessageBox.warning(self, "경고", "클립보드에 복사한 구간이 없습니다.")
             return
-        which, segment, sr = self._clipboard
-        _, data, track_sr = self._current_track()
+        _, segment, sr = self._clipboard
+        which, data, track_sr = self._current_track()
         if data is None:
             return
         if track_sr != sr:
             QMessageBox.warning(self, "경고", "샘플레이트가 달라 붙여넣을 수 없습니다.")
             return
+        if np.ndim(data) != np.ndim(segment) or (
+            np.ndim(data) == 2 and data.shape[1] != segment.shape[1]
+        ):
+            QMessageBox.warning(self, "경고", "채널 수가 달라 붙여넣을 수 없습니다.")
+            return
         r = self._region_for_track(which).getRegion()
         insert_pos = float(r[0])
-        i0 = int(round(insert_pos * sr))
+        i0 = int(round(insert_pos * track_sr))
         i0 = max(0, min(i0, len(data)))
-        self._push_history(which, data, sr)
+        self._push_history(which, data, track_sr)
         if np.ndim(data) == 1:
             new_data = np.concatenate([data[:i0], segment, data[i0:]])
         else:
             new_data = np.concatenate([data[:i0], segment, data[i0:]], axis=0)
-        self._set_track(which, new_data, sr, f"클립보드 붙여넣기 ({len(segment)} 샘플 삽입)")
+        self._set_track(which, new_data, track_sr, f"클립보드 붙여넣기 ({len(segment)} 샘플 삽입)")
 
     def loop_play(self, start_sec=None):
         """선택 구간을 반복 재생한다 (두 트랙 동시 재생)."""

@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from starlette.responses import JSONResponse
 import os, glob, site
 # NVIDIA CUDA 12 런타임 DLL 경로 추가 (pip nvidia-*-cu12)
 for sp in site.getsitepackages():
@@ -12,6 +13,66 @@ import os
 from typing import Optional
 
 app = FastAPI(title="Local STT Server (stable-ts)")
+MAX_UPLOAD_BYTES = 2 * 1024**3
+MAX_REQUEST_BODY_BYTES = MAX_UPLOAD_BYTES + 16 * 1024**2
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+class _RequestBodyTooLarge(Exception):
+    pass
+
+
+class _UploadSizeLimitMiddleware:
+    def __init__(self, app, max_body_size):
+        self.app = app
+        self.max_body_size = max_body_size
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "POST"
+            or scope["path"] != "/v1/audio/transcriptions"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        content_length = headers.get(b"content-length")
+        if content_length:
+            try:
+                if int(content_length) > self.max_body_size:
+                    await JSONResponse(
+                        {"detail": "요청 크기가 최대 허용 용량을 초과했습니다."},
+                        status_code=413,
+                    )(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_size:
+                    raise _RequestBodyTooLarge
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except _RequestBodyTooLarge:
+            await JSONResponse(
+                {"detail": "요청 크기가 최대 허용 용량을 초과했습니다."},
+                status_code=413,
+            )(scope, receive, send)
+
+
+app.add_middleware(
+    _UploadSizeLimitMiddleware,
+    max_body_size=MAX_REQUEST_BODY_BYTES,
+)
 
 MODEL_NAME = os.getenv("MODEL_NAME", "large-v3")
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "int8")
@@ -36,11 +97,23 @@ async def transcribe_audio(
 ):
     ext = os.path.splitext(file.filename or "")[1] or ".wav"
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
+    tmp_path = None
     try:
+        uploaded_bytes = 0
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            tmp_path = tmp.name
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                uploaded_bytes += len(chunk)
+                if uploaded_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="오디오 파일은 최대 2GiB까지 업로드할 수 있습니다.",
+                    )
+                tmp.write(chunk)
+
         if lyrics.strip():
             # 섹션 태그([Intro], [Verse 1] 등)는 타이밍 생성 대상에서 제외
             import re
@@ -96,10 +169,14 @@ async def transcribe_audio(
             return {"text": payload["text"]}
         return payload
 
+    except HTTPException:
+        raise
     except Exception as e:
         return {"error": str(e)}
     finally:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        await file.close()

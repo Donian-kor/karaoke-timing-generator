@@ -37,7 +37,7 @@ class ServerStartWorker(QThread):
         try:
             with open(err_file, "w") as ef:
                 self.proc = subprocess.Popen(
-                    [self.python_exe, "-m", "uvicorn", "stt_server:app", "--host", "0.0.0.0", "--port", "8000"],
+                    [self.python_exe, "-m", "uvicorn", "stt_server:app", "--host", "127.0.0.1", "--port", "8000"],
                     cwd=self.script_dir,
                     env=env,
                     stdout=ef,

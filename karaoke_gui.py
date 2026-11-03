@@ -184,7 +184,7 @@ class MainWindow(QWidget):
         file_menu = menubar.addMenu("파일(&F)")
         file_menu.addAction("오디오 열기", self.browse_audio)
         file_menu.addAction(
-            "보컬 열기", lambda: self.audio_editor_panel.open_track(2)
+            "보컬 열기", lambda: self.audio_editor_panel.open_track(1)
         )
         file_menu.addSeparator()
         file_menu.addAction("보컬 저장", self._panel_action("save_track", 1))
@@ -625,37 +625,13 @@ class MainWindow(QWidget):
                     pass
             self.server_proc = None
 
-        # 기존 서버(내부/외부 모두) 종료 후 재시작
-        if self.server_proc is not None and self.server_proc.poll() is None:
-            try:
-                self.server_proc.terminate()
-                self.server_proc.wait(timeout=10)
-            except Exception:
-                try:
-                    self.server_proc.kill()
-                except Exception:
-                    pass
-            self.server_proc = None
-        # 포트 8000을 사용하는 외부 프로세스도 종료
-        try:
-            out = subprocess.check_output(["netstat", "-ano"], text=True, stderr=subprocess.DEVNULL, timeout=5)
-            for line in out.splitlines():
-                if ":8000" in line and "LISTENING" in line:
-                    parts = line.split()
-                    pid = parts[-1]
-                    if pid.isdigit() and int(pid) != os.getpid():
-                        subprocess.run(["taskkill", "/PID", pid, "/F"],
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-        except Exception:
-            pass
-        # 포트가 해제될 때까지 잠시 대기
-        import time as _t
-        for _ in range(10):
-            try:
-                requests.get(f"{SERVER_URL}/health", timeout=1)
-                _t.sleep(0.5)
-            except Exception:
-                break
+        # 이미 실행 중인 서버는 이 앱이 소유한 프로세스인지 확인할 수 없으므로 종료하지 않는다.
+        if self.check_health():
+            self.status_label.setText(
+                "포트 8000에서 서버가 이미 실행 중입니다. 기존 서버를 종료하지 않았습니다."
+            )
+            self._update_server_btn()
+            return
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.status_label.setText("서버 시작 중... (모델 로딩에 시간이 걸릴 수 있습니다)")
@@ -714,21 +690,13 @@ class MainWindow(QWidget):
                 except Exception:
                     pass
             self.server_proc = None
-        # 외부 서버도 종료 (포트 8000)
-        try:
-            import subprocess
-            out = subprocess.check_output(["netstat", "-ano"], text=True, stderr=subprocess.DEVNULL, timeout=5)
-            for line in out.splitlines():
-                if ":8000" in line and "LISTENING" in line:
-                    parts = line.split()
-                    pid = parts[-1]
-                    if pid.isdigit() and int(pid) != os.getpid():
-                        subprocess.run(["taskkill", "/PID", pid, "/F"],
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-        except Exception:
-            pass
-        self.server_status.setText("서버 상태: 중지됨")
-        self.status_label.setText("서버가 중지되었습니다.")
+        server_running = self.check_health()
+        if server_running:
+            self.status_label.setText(
+                "포트 8000의 서버가 계속 응답 중입니다. 이 앱에서 시작하지 않은 서버는 종료하지 않았습니다."
+            )
+        else:
+            self.status_label.setText("서버가 중지되었습니다.")
         self._update_server_btn()
 
     def check_health(self):
@@ -737,10 +705,11 @@ class MainWindow(QWidget):
             if r.status_code == 200:
                 info = r.json()
                 self.server_status.setText(f"서버 상태: 실행 중 ({info.get('model','')}, {info.get('compute_type','')})")
-                return
+                return True
         except Exception:
             pass
         self.server_status.setText("서버 상태: 중지됨")
+        return False
 
     def generate(self):
         audio_path = self.audio_edit.text().strip()
