@@ -275,6 +275,7 @@ class AudioEditorPanel(QWidget):
         btn_open2.clicked.connect(lambda: self.open_track(2))
         btn_open2.setProperty("secondary", True)
         toolbar.addWidget(btn_open2)
+        self.btn_open_instrumental = btn_open2
         toolbar.addSpacing(12)
         btn_play = QPushButton("▶ 재생")
         btn_play.clicked.connect(lambda: self.play_current())
@@ -749,6 +750,11 @@ class AudioEditorPanel(QWidget):
         self._top_toolbar.removeWidget(self.btn_open_vocal)
         self.btn_open_vocal.setVisible(True)
         return self.btn_open_vocal
+
+    def take_instrumental_open_button(self):
+        self._top_toolbar.removeWidget(self.btn_open_instrumental)
+        self.btn_open_instrumental.setVisible(True)
+        return self.btn_open_instrumental
 
     def _update_target_highlight(self):
         """현재 편집 대상 트랙의 파형에 강조 테두리를 입힌다."""

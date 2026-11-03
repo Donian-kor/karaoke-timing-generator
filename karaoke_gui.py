@@ -370,6 +370,9 @@ class MainWindow(QWidget):
         workspace_toolbar.addWidget(
             self.audio_editor_panel.take_vocal_open_button()
         )
+        workspace_toolbar.addWidget(
+            self.audio_editor_panel.take_instrumental_open_button()
+        )
         self.preview_section.move_controls_to(workspace_toolbar)
         # 재생/정지 버튼을 재생 슬라이더 왼쪽으로 이동
         btn_play_toggle, btn_stop = self.preview_section.take_play_stop_controls()
