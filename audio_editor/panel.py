@@ -324,8 +324,13 @@ class AudioEditorPanel(QWidget):
                     else self._adjust_selection_start
                 )(delta)
             )
-        self.plot2.setXLink(self.plot1)
-        self.plot3.setXLink(self.plot1)
+        # pyqtgraph의 setXLink는 두 플롯의 화면 위치 차이를 보정하며 범위를 밀어서
+        # 시작점이 어긋나므로, X축 범위를 그대로 복사해 동기화한다.
+        self._syncing_x = False
+        for plot in (self.plot1, self.plot2, self.plot3):
+            plot.getViewBox().sigXRangeChanged.connect(
+                lambda *_, src=plot: self._sync_x_range(src)
+            )
 
         self._setup_plot(self.plot1, "#99f6e4", "#0f172a")
         self._setup_plot(self.plot2, "#bfdbfe", "#0f172a")
@@ -347,6 +352,11 @@ class AudioEditorPanel(QWidget):
         self.height1.valueChanged.connect(lambda v: self.plot1.setFixedHeight(v))
         self.height2.valueChanged.connect(lambda v: self.plot2.setFixedHeight(v))
         self.height3.valueChanged.connect(lambda v: self.plot3.setFixedHeight(v))
+        # 슬라이더 기본값을 파형의 기본 높이로 적용한다.
+        # (최소 높이로 두어 창을 키우면 함께 늘어나게 한다.)
+        for plot, height in ((self.plot1, self.height1), (self.plot2, self.height2),
+                             (self.plot3, self.height3)):
+            plot.setMinimumHeight(height.value())
 
         # 볼륨/M/S 변경 시 재생 중이면 현재 위치에서 다시 믹싱해 반영
         self._mix_timer = QTimer(self)
@@ -593,7 +603,7 @@ class AudioEditorPanel(QWidget):
         # 트랙 높이 조절 슬라이더
         height = QSlider(Qt.Horizontal)
         height.setRange(50, 400)
-        height.setValue(120)
+        height.setValue(140)
         height.setFixedHeight(20)
         height.setToolTip("트랙 높이 조절")
         v.addWidget(height)
@@ -698,6 +708,35 @@ class AudioEditorPanel(QWidget):
             self.status.setText(msg)
         # 스핀박스 값이 실제 선택 영역과 일치하도록 맞춘다.
         self._region_to_spins()
+        self._align_track_view()
+
+    def _sync_x_range(self, src):
+        """한 파형의 X축 범위를 나머지 파형 플롯에 그대로 복사한다."""
+        if self._syncing_x:
+            return
+        x_min, x_max = src.getViewBox().viewRange()[0]
+        self._syncing_x = True
+        try:
+            for plot in (self.plot1, self.plot2, self.plot3):
+                if plot is src:
+                    continue
+                vb = plot.getViewBox()
+                vb.enableAutoRange(axis="x", enable=False)
+                vb.setXRange(x_min, x_max, padding=0)
+        finally:
+            self._syncing_x = False
+
+    def _align_track_view(self):
+        """두 파형 트랙이 같은 시작점(0초)에서 보이도록 X축을 전체 길이로 맞춘다."""
+        total = 0.0
+        for data, sr in ((self.track1, self.sr1), (self.track2, self.sr2)):
+            if data is not None and sr:
+                total = max(total, len(data) / sr)
+        if total <= 0:
+            return
+        for plot in (self.plot1, self.plot2, self.plot3):
+            plot.getViewBox().enableAutoRange(axis="x", enable=False)
+        self.plot1.getViewBox().setXRange(0, total, padding=0)
 
     def _plot_track(self, plot, data, sr, title):
         # plot.clear()를 쓰면 핀포인트/선택 영역까지 지워지므로,

@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QTextEdit, QProgressBar, QComboBox, QCheckBox, QMessageBox,
     QDialog, QSplitter, QColorDialog, QSpinBox, QSlider, QFrame, QMenuBar,
+    QStackedWidget,
 )
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent, QShortcut, QKeySequence
 from audio_editor import AudioEditorPanel
@@ -112,7 +113,6 @@ class MainWindow(QWidget):
                 "font_sizes": dict(self._font_sizes),
                 "window_size": [self.width(), self.height()],
                 "splitter_sizes": self.vsplitter.sizes(),
-                "settings_collapsed": self.settings_section.is_collapsed(),
                 "waveform_visible": self.chk_waveform_visible.isChecked(),
             }
             with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
@@ -167,7 +167,7 @@ class MainWindow(QWidget):
             if isinstance(window_size, list) and len(window_size) == 2:
                 self.resize(*window_size)
             splitter_sizes = self._settings.get("splitter_sizes")
-            if isinstance(splitter_sizes, list) and len(splitter_sizes) == 3:
+            if isinstance(splitter_sizes, list) and len(splitter_sizes) == self.vsplitter.count():
                 self.vsplitter.setSizes(splitter_sizes)
         except Exception:
             pass
@@ -257,9 +257,8 @@ class MainWindow(QWidget):
         main_layout.setContentsMargins(4, 4, 4, 4)
         main_layout.setSpacing(4)
 
-        # 설정 섹션 (SettingsSection 위젯)
+        # 설정 섹션 (SettingsSection 위젯) — 왼쪽 '오디오 파일 설정' 탭에 배치
         self.settings_section = SettingsSection()
-        self.settings_section.collapsed_changed.connect(self._on_settings_collapsed)
         # 하위 호환: 기존 코드에서 self.xxx 로 접근 가능하도록 노출
         self.server_status = self.settings_section.server_status
         self.btn_server_toggle = self.settings_section.btn_server_toggle
@@ -364,9 +363,11 @@ class MainWindow(QWidget):
         workspace_toolbar = QHBoxLayout()
         workspace_toolbar.setContentsMargins(4, 0, 4, 0)
         workspace_toolbar.setSpacing(6)
-        workspace_toolbar.addWidget(
-            self.settings_section.take_audio_browse_button()
-        )
+        # 설정 패널의 '찾기' 버튼은 그대로 두고, 툴바에는 별도 '오디오 열기' 버튼을 둔다.
+        self.btn_audio_open = QPushButton("오디오 열기")
+        self.btn_audio_open.setProperty("secondary", True)
+        self.btn_audio_open.clicked.connect(self.browse_audio)
+        workspace_toolbar.addWidget(self.btn_audio_open)
         workspace_toolbar.addWidget(
             self.audio_editor_panel.take_vocal_open_button()
         )
@@ -392,16 +393,54 @@ class MainWindow(QWidget):
         workspace_layout.addWidget(self.preview_section)
         workspace_layout.addWidget(self.audio_editor_panel, 1)
 
-        # ── 배치: 설정 → 미리보기/파형 작업영역 → 가사/LRC ────────────
+        # ── 배치: 왼쪽 탭(Main / 오디오 파일 설정) ────────────
         self.vsplitter = QSplitter(Qt.Vertical)
-        self.vsplitter.addWidget(self.settings_section)
         self.vsplitter.addWidget(self.audio_workspace)
         self.vsplitter.addWidget(self.lyrics_section)
-        self.vsplitter.setSizes([36, 420, 180])
-        self.vsplitter.setStretchFactor(0, 0)
-        self.vsplitter.setStretchFactor(1, 3)
-        self.vsplitter.setStretchFactor(2, 2)
-        main_layout.addWidget(self.vsplitter, 1)
+        self.vsplitter.setSizes([470, 190])
+        self.vsplitter.setStretchFactor(0, 3)
+        self.vsplitter.setStretchFactor(1, 2)
+
+        # 탭 위젯 대신 왼쪽 사이드 메뉴 + 스택을 써서 한글 라벨이 가로로 보이게 한다.
+        self.side_stack = QStackedWidget()
+        self.side_stack.addWidget(self.vsplitter)
+        self.side_stack.addWidget(self.settings_section)
+
+        self.side_menu = QFrame()
+        self.side_menu.setObjectName("sideMenu")
+        self.side_menu.setFixedWidth(136)
+        self.side_menu.setStyleSheet("QFrame { background-color: #EEF2F7; border: none; border-right: 1px solid #BDBDBD; }")
+        side_layout = QVBoxLayout(self.side_menu)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(0)
+        self.side_buttons = []
+        for index, text in enumerate(("Main", "오디오 파일 설정")):
+            btn = QPushButton(text)
+            btn.setObjectName("sideMenuButton")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { background-color: transparent; color: #334155; "
+                "border: none; border-left: 3px solid transparent; "
+                "padding: 13px 10px; text-align: left; font-weight: 600; }"
+                "QPushButton:hover { background-color: #E2E8F0; }"
+                "QPushButton:checked { background-color: #FFFFFF; color: #1976D2; "
+                "border-left: 3px solid #1976D2; font-weight: 800; }"
+            )
+            btn.clicked.connect(
+                lambda _checked=False, i=index: self.set_side_tab(i)
+            )
+            side_layout.addWidget(btn)
+            self.side_buttons.append(btn)
+        side_layout.addStretch(1)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self.side_menu)
+        body.addWidget(self.side_stack, 1)
+        main_layout.addLayout(body, 1)
+        self.set_side_tab(0)
         self.chk_waveform_visible.toggled.connect(
             self._on_waveform_visibility_changed
         )
@@ -413,9 +452,6 @@ class MainWindow(QWidget):
         )
         self._on_waveform_visibility_changed(
             self.chk_waveform_visible.isChecked()
-        )
-        self.settings_section.set_collapsed(
-            self._settings.get("settings_collapsed", True)
         )
 
         self._update_compute_combo()
@@ -430,26 +466,16 @@ class MainWindow(QWidget):
     def _panel_action(self, method_name, *args):
         return lambda: getattr(self.audio_editor_panel, method_name)(*args)
 
-    def _on_settings_collapsed(self, collapsed):
-        """설정 섹션 접기/펼치기 시 스플리터 크기를 조정한다."""
-        waveform_visible = self.chk_waveform_visible.isChecked()
-        if collapsed:
-            sizes = [40, 470, 190] if waveform_visible else [40, 130, 530]
-        else:
-            saved = getattr(self.settings_section, '_saved_sizes', None)
-            if saved and len(saved) == 3:
-                sizes = saved
-            else:
-                sizes = [100, 470, 190] if waveform_visible else [100, 130, 530]
-        self.vsplitter.setSizes(sizes)
+    def set_side_tab(self, index: int) -> None:
+        """왼쪽 사이드 메뉴에서 선택한 화면으로 전환한다."""
+        self.side_stack.setCurrentIndex(index)
+        for i, btn in enumerate(self.side_buttons):
+            btn.setChecked(i == index)
 
     def _on_waveform_visibility_changed(self, visible):
         self.audio_editor_panel.setVisible(visible)
-        settings_height = 40 if self.settings_section.is_collapsed() else 100
         workspace_height, lyrics_height = (470, 190) if visible else (130, 530)
-        self.vsplitter.setSizes(
-            [settings_height, workspace_height, lyrics_height]
-        )
+        self.vsplitter.setSizes([workspace_height, lyrics_height])
 
     def _on_health_checked(self, ok, model, compute_type):
         if ok:
@@ -921,7 +947,7 @@ class MainWindow(QWidget):
         self.audio_editor_panel.set_lrc_text(self.preview.toPlainText().strip())
         self.chk_waveform_visible.setChecked(True)
         self._on_audio_path_changed(audio_path)
-        self.vsplitter.setSizes([self.settings_section.height(), 470, 190])
+        self.vsplitter.setSizes([470, 190])
 
     def open_denoise(self):
         """파일 전체를 스트리밍으로 처리하는 잡음 제거 창을 연다."""

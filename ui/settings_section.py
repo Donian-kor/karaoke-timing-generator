@@ -5,7 +5,7 @@
 타이밍 생성/취소/오디오 편집/잡음 제거 버튼, 진행률 바를 포함한다.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QFileDialog, QProgressBar, QComboBox, QLineEdit, QSpinBox,
@@ -39,13 +39,10 @@ class SettingsSection(QFrame):
     song_refresh_clicked = Signal()
     settings_changed = Signal()
 
-    collapsed_changed = Signal(bool)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("settingsSection")
         self.setProperty("section", True)
-        self._collapsed = False
         self._content_widgets = []
 
         self._build_ui()
@@ -55,24 +52,7 @@ class SettingsSection(QFrame):
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
-        # 섹션 제목 행
-        title_row = QHBoxLayout()
-        self._title_btn = QPushButton("▼ 오디오 파일 설정")
-        self._title_btn.setFlat(True)
-        self._title_btn.setCursor(Qt.PointingHandCursor)
-        self._title_btn.setToolTip("클릭하여 접기/펼치기")
-        self._title_btn.setStyleSheet(
-            "QPushButton { font-size: 14px; font-weight: 800; color: #1976D2; "
-            "text-align: left; border: none; background: transparent; padding: 2px 0; }"
-            "QPushButton:hover { color: #1565C0; }"
-        )
-        self._title_btn.clicked.connect(self._toggle_collapse)
-        title_row.addWidget(self._title_btn)
-        title_row.addStretch(1)
-        layout.addLayout(title_row)
-        self._title_row = title_row
-
-        # 콘텐츠 영역 (접기/펼치기 대상)
+        # 콘텐츠 영역
         self._content = QWidget()
         # 내부 QWidget의 기본 회색 배경이 겹쳐 보이지 않도록 투명 처리
         self._content.setStyleSheet("background-color: transparent;")
@@ -112,7 +92,6 @@ class SettingsSection(QFrame):
         btn_browse.clicked.connect(lambda: self.audio_browse_clicked.emit())
         row.addWidget(btn_browse)
         self._content_layout.addLayout(row)
-        self._audio_file_row = row
 
         # 2행: 언어 / 모델 / 연산
         row = QHBoxLayout()
@@ -193,51 +172,8 @@ class SettingsSection(QFrame):
         self.progress.setVisible(False)
         row.addWidget(self.progress, 1)
         self._content_layout.addLayout(row)
-
-    def _toggle_collapse(self):
-        """설정 섹션을 접거나 펼친다."""
-        # 접기 전에 현재 크기를 저장 (펼칠 때 복원용)
-        if not self._collapsed:
-            parent = self.parent()
-            if parent is not None:
-                # parent는 QSplitter이므로 sizes()를 직접 호출
-                try:
-                    self._saved_sizes = list(parent.sizes())
-                except Exception:
-                    self._saved_sizes = None
-
-        self._collapsed = not self._collapsed
-        self._content.setVisible(not self._collapsed)
-        if self._collapsed:
-            self._title_btn.setText("▶ 오디오 파일 설정")
-        else:
-            self._title_btn.setText("▼ 오디오 파일 설정")
-        if self._collapsed:
-            # 제목 행만 보이도록 최소 높이 설정
-            # 콘텐츠 숨김 시 레이아웃 간격/마진 최소화
-            self._content_layout.setSpacing(0)
-            self.layout().setSpacing(0)
-            self.layout().setContentsMargins(8, 4, 8, 4)
-            # 제목 행만 보이도록 높이 설정
-            self.setMaximumHeight(65)
-        else:
-            self._content_layout.setSpacing(12)
-            self.layout().setSpacing(12)
-            self.layout().setContentsMargins(8, 8, 2, 8)
-            self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
-        self.collapsed_changed.emit(self._collapsed)
-
-    def is_collapsed(self) -> bool:
-        return self._collapsed
-
-    def take_audio_browse_button(self):
-        self._audio_file_row.removeWidget(self.btn_audio_browse)
-        self.btn_audio_browse.setText("오디오 열기")
-        return self.btn_audio_browse
-
-    def set_collapsed(self, collapsed: bool) -> None:
-        if self._collapsed != collapsed:
-            self._toggle_collapse()
+        # 탭 전체 높이를 채울 때 설정 항목이 위쪽에 모이도록 여백을 둔다.
+        self._content_layout.addStretch(1)
 
     # ---------- 편의 메서드 ----------
 

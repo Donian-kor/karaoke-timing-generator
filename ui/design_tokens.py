@@ -114,7 +114,38 @@ def _build_design_qss() -> str:
             background-color: #F5F3FF;
         }}
         #previewSection {{
-            background-color: #E8F5E9;
+            background-color: #E2E8F0;
+            border: none;
+            border-bottom: 1px solid #CBD5E1;
+            padding: 0;
+            margin-top: 0;
+            margin-bottom: 0;
+        }}
+        #previewContent {{
+            background: transparent;
+        }}
+        #sideMenu {{
+            background-color: #EEF2F7;
+            border: none;
+            border-right: 1px solid {c['border']};
+        }}
+        #sideMenuButton {{
+            background-color: transparent;
+            color: #334155;
+            border: none;
+            border-left: 3px solid transparent;
+            padding: 13px 10px;
+            text-align: left;
+            font-weight: 600;
+        }}
+        #sideMenuButton:hover {{
+            background-color: #E2E8F0;
+        }}
+        #sideMenuButton:checked {{
+            background-color: {c['input_bg']};
+            color: {c['primary']};
+            border-left: 3px solid {c['primary']};
+            font-weight: 800;
         }}
         QFrame[section="true"] QLabel[sectionTitle="true"] {{
             font-size: {f['size_large']}pt;

@@ -84,7 +84,23 @@ class _SelectablePlot(pg.PlotWidget):
             vb.setXRange(new_min, new_min + new_span, padding=0)
             ev.accept()
             return
-        super().wheelEvent(ev)
+        # Ctrl 없는 휠: 파형을 좌우로 스크롤한다.
+        delta = ev.angleDelta().y()
+        if delta == 0:
+            delta = ev.angleDelta().x()
+        if delta == 0:
+            super().wheelEvent(ev)
+            return
+        vb = self.getViewBox()
+        x_min, x_max = vb.viewRange()[0]
+        span = x_max - x_min
+        if span <= 0:
+            super().wheelEvent(ev)
+            return
+        step = span * 0.1
+        new_min = max(0.0, x_min - step if delta > 0 else x_min + step)
+        vb.setXRange(new_min, new_min + span, padding=0)
+        ev.accept()
 
     def _x_from_event(self, ev):
         try:

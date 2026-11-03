@@ -44,8 +44,8 @@ class PreviewSection(QFrame):
         self._title_btn.hide()
         self._content.setVisible(True)
         self._expanded = True
-        self.setMinimumHeight(36)
-        self.setMaximumHeight(42)
+        self.setMinimumHeight(72)
+        self.setMaximumHeight(84)
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().setSpacing(0)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
@@ -53,12 +53,12 @@ class PreviewSection(QFrame):
 
         self.preview_lyric_label.setWordWrap(False)
         self.preview_lyric_label.setMinimumWidth(0)
-        self.preview_lyric_label.setMinimumHeight(28)
-        self.preview_lyric_label.setMaximumHeight(34)
+        self.preview_lyric_label.setMinimumHeight(56)
+        self.preview_lyric_label.setMaximumHeight(84)
         self.preview_lyric_label.setStyleSheet(
             "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 14px; "
-            "font-weight: 700; color: #1E293B; background: #FFFFFF; "
-            "padding: 3px 8px; border-radius: 4px; border: 1px solid #E2E8F0;"
+            "font-weight: 700; color: #1E293B; background: transparent; "
+            "padding: 0 8px; border: none;"
         )
 
     def move_controls_to(self, layout):
@@ -110,6 +110,7 @@ class PreviewSection(QFrame):
 
         # 접힐 내용 컨테이너
         self._content = QWidget()
+        self._content.setObjectName("previewContent")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(12)
