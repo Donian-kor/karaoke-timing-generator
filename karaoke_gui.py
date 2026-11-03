@@ -368,9 +368,6 @@ class MainWindow(QWidget):
         self.btn_audio_open.clicked.connect(self.browse_audio)
         workspace_toolbar.addWidget(self.btn_audio_open)
         workspace_toolbar.addWidget(
-            self.audio_editor_panel.take_vocal_open_button()
-        )
-        workspace_toolbar.addWidget(
             self.audio_editor_panel.take_instrumental_open_button()
         )
         self.preview_section.move_controls_to(workspace_toolbar)

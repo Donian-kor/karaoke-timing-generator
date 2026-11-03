@@ -348,7 +348,7 @@ class AudioEditorPanel(QWidget):
         toolbar.addWidget(self.status)
         layout.addWidget(self.toolbar_frame)
         self._top_toolbar = toolbar
-        self._compact_duplicate_controls = (btn_open2,)
+        self._compact_duplicate_controls = (btn_open1, btn_open2)
         self.btn_open_vocal = btn_open1
 
         # 재생 슬라이더와 시간 표기는 파형 그래프 아래로 이동 (아래에서 추가)
