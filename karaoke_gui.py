@@ -187,10 +187,10 @@ class MainWindow(QWidget):
             "보컬 열기", lambda: self.audio_editor_panel.open_track(2)
         )
         file_menu.addSeparator()
-        file_menu.addAction("반주 저장", self._panel_action("save_track", 1))
-        file_menu.addAction("보컬 저장", self._panel_action("save_track", 2))
+        file_menu.addAction("보컬 저장", self._panel_action("save_track", 1))
+        file_menu.addAction("반주 저장", self._panel_action("save_track", 2))
         file_menu.addAction(
-            "두 트랙 따로 저장", self._panel_action("save_both_tracks")
+            "분리 저장", self._panel_action("save_both_tracks")
         )
         file_menu.addAction("믹스 저장", self._panel_action("save_result"))
         file_menu.addSeparator()
@@ -300,7 +300,6 @@ class MainWindow(QWidget):
         self.btn_offset = self.lyrics_section.btn_offset
         self._highlighter = LrcHighlighter(self.lyrics_section.preview.document())
         self.btn_gen = self.lyrics_section.btn_gen
-        self.btn_audio_edit = self.lyrics_section.btn_audio_edit
         self.btn_denoise = self.lyrics_section.btn_denoise
 
         # LyricsSection 시그널 연결
@@ -311,7 +310,6 @@ class MainWindow(QWidget):
         self.lyrics_section.line_offset_clicked.connect(self.apply_line_offset)
         self.lyrics_section.offset_clicked.connect(self.apply_offset)
         self.lyrics_section.gen_clicked.connect(self.on_gen_toggle)
-        self.lyrics_section.audio_edit_clicked.connect(self.open_audio_editor)
         self.lyrics_section.denoise_clicked.connect(self.open_denoise)
 
 
@@ -364,7 +362,7 @@ class MainWindow(QWidget):
         workspace_toolbar.setContentsMargins(4, 0, 4, 0)
         workspace_toolbar.setSpacing(6)
         # 설정 패널의 '찾기' 버튼은 그대로 두고, 툴바에는 별도 '오디오 열기' 버튼을 둔다.
-        self.btn_audio_open = QPushButton("오디오 열기")
+        self.btn_audio_open = QPushButton("보컬 불러오기")
         self.btn_audio_open.setProperty("secondary", True)
         self.btn_audio_open.clicked.connect(self.browse_audio)
         workspace_toolbar.addWidget(self.btn_audio_open)
@@ -377,8 +375,6 @@ class MainWindow(QWidget):
         offset_toolbar = QHBoxLayout()
         offset_toolbar.setContentsMargins(4, 0, 4, 0)
         offset_toolbar.setSpacing(6)
-        offset_toolbar.addWidget(QLabel("싱크:"))
-        self.lyrics_section.move_offset_controls_to(offset_toolbar)
         offset_toolbar.addStretch(1)
         self.chk_waveform_visible = QCheckBox("파형 표시")
         self.chk_waveform_visible.setChecked(
@@ -390,6 +386,10 @@ class MainWindow(QWidget):
         offset_toolbar.addWidget(self.chk_waveform_visible)
         workspace_layout.addLayout(offset_toolbar)
 
+        # 오디오 편집기 툴바를 재생 미리보기 위로 이동
+        self.audio_toolbar = self.audio_editor_panel.take_toolbar()
+        self.audio_toolbar.setVisible(True)
+        workspace_layout.addWidget(self.audio_toolbar)
         workspace_layout.addWidget(self.preview_section)
         workspace_layout.addWidget(self.audio_editor_panel, 1)
 
@@ -397,7 +397,7 @@ class MainWindow(QWidget):
         self.vsplitter = QSplitter(Qt.Vertical)
         self.vsplitter.addWidget(self.audio_workspace)
         self.vsplitter.addWidget(self.lyrics_section)
-        self.vsplitter.setSizes([470, 190])
+        self.vsplitter.setSizes([504, 336])
         self.vsplitter.setStretchFactor(0, 3)
         self.vsplitter.setStretchFactor(1, 2)
 
@@ -474,7 +474,7 @@ class MainWindow(QWidget):
 
     def _on_waveform_visibility_changed(self, visible):
         self.audio_editor_panel.setVisible(visible)
-        workspace_height, lyrics_height = (470, 190) if visible else (130, 530)
+        workspace_height, lyrics_height = (504, 336) if visible else (130, 710)
         self.vsplitter.setSizes([workspace_height, lyrics_height])
 
     def _on_health_checked(self, ok, model, compute_type):
@@ -782,7 +782,6 @@ class MainWindow(QWidget):
 
         self.progress.setVisible(True)
         self.lyrics_section.set_generating(True)
-        self.preview_section.expand()
         self.status_label.setText("타이밍 생성 중...")
         self.preview.clear()
 
@@ -947,7 +946,7 @@ class MainWindow(QWidget):
         self.audio_editor_panel.set_lrc_text(self.preview.toPlainText().strip())
         self.chk_waveform_visible.setChecked(True)
         self._on_audio_path_changed(audio_path)
-        self.vsplitter.setSizes([470, 190])
+        self.vsplitter.setSizes([504, 336])
 
     def open_denoise(self):
         """파일 전체를 스트리밍으로 처리하는 잡음 제거 창을 연다."""
@@ -1088,7 +1087,7 @@ class MainWindow(QWidget):
             else:
                 break
         if idx < 0 or pos < self._preview_parsed[0][0]:
-            self.preview_section.preview_lyric_label.setText("")
+            self.preview_section.show_placeholder()
             self._clear_preview_highlight()
         else:
             self._highlight_preview_line(idx)
@@ -1156,7 +1155,7 @@ class MainWindow(QWidget):
     def _update_play_btn(self):
         """재생 상태에 따라 토글 버튼 텍스트와 스타일을 업데이트한다."""
         if self.audio_editor_panel.is_playing:
-            self.preview_section.btn_play_toggle.setText("일시정지")
+            self.preview_section.btn_play_toggle.setText("정지")
         else:
             self.preview_section.btn_play_toggle.setText("재생")
 
@@ -1186,7 +1185,7 @@ class MainWindow(QWidget):
 
     def _stop_integrated_playback(self):
         self.audio_editor_panel.stop_playback()
-        self.preview_section.preview_lyric_label.setText("")
+        self.preview_section.show_placeholder()
         self.preview_section.preview_time_label.setText("0:00.00 / 0:00.00")
         self._clear_preview_highlight()
         self._update_play_btn()

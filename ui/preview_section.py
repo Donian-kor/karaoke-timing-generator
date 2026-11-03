@@ -29,23 +29,21 @@ class PreviewSection(QFrame):
     slider_moved = Signal(int)
     speed_changed = Signal(str)
     color_changed = Signal(str)
-    collapsed_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("previewSection")
         self.setProperty("section", True)
 
-        self._expanded = False
         self._build_ui()
-        self.collapse()
+        self._content.setVisible(True)
+        self.setMinimumHeight(80)
+        self.setMaximumHeight(120)
 
     def set_compact_mode(self):
-        self._title_btn.hide()
         self._content.setVisible(True)
-        self._expanded = True
-        self.setMinimumHeight(72)
-        self.setMaximumHeight(84)
+        self.setMinimumHeight(80)
+        self.setMaximumHeight(120)
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().setSpacing(0)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
@@ -53,12 +51,12 @@ class PreviewSection(QFrame):
 
         self.preview_lyric_label.setWordWrap(False)
         self.preview_lyric_label.setMinimumWidth(0)
-        self.preview_lyric_label.setMinimumHeight(56)
-        self.preview_lyric_label.setMaximumHeight(84)
+        self.preview_lyric_label.setMinimumHeight(60)
+        self.preview_lyric_label.setMaximumHeight(100)
         self.preview_lyric_label.setStyleSheet(
-            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 14px; "
-            "font-weight: 700; color: #1E293B; background: transparent; "
-            "padding: 0 8px; border: none;"
+            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 28px; "
+            "font-weight: 700; color: #FFFFFF; background-color: #000000; "
+            "padding: 12px 16px; border-radius: 8px; border: 1px solid #475569;"
         )
 
     def move_controls_to(self, layout):
@@ -87,7 +85,7 @@ class PreviewSection(QFrame):
         self.preview_time_label.setMaximumWidth(132)
         self.preview_time_label.setStyleSheet("font-size: 11px; font-weight: 700;")
         self.preview_slider.setMinimumWidth(96)
-        self.btn_play_toggle.setFixedWidth(64)
+        self.btn_play_toggle.setFixedWidth(96)
         self.btn_stop.setFixedWidth(64)
         self.speed_combo.setFixedWidth(78)
 
@@ -95,18 +93,6 @@ class PreviewSection(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
-
-        # 접기/펼치기 가능한 제목 버튼
-        self._title_btn = QPushButton("▶ 재생 미리보기")
-        self._title_btn.setFlat(True)
-        self._title_btn.setCursor(Qt.PointingHandCursor)
-        self._title_btn.setStyleSheet(
-            "QPushButton { font-size: 14px; font-weight: 800; color: #1976D2; "
-            "text-align: left; border: none; background: transparent; padding: 2px 0; }"
-            "QPushButton:hover { color: #1565C0; }"
-        )
-        self._title_btn.clicked.connect(self.toggle)
-        layout.addWidget(self._title_btn)
 
         # 접힐 내용 컨테이너
         self._content = QWidget()
@@ -116,15 +102,15 @@ class PreviewSection(QFrame):
         self._content_layout.setSpacing(12)
 
         # 미리보기 가사 라벨
-        self.preview_lyric_label = QLabel("")
+        self.preview_lyric_label = QLabel("자막 미리보기")
         self.preview_lyric_label.setAlignment(Qt.AlignCenter)
         self.preview_lyric_label.setFocusPolicy(Qt.ClickFocus)
         self.preview_lyric_label.setWordWrap(True)
         self.preview_lyric_label.setTextFormat(Qt.RichText)
         self.preview_lyric_label.setMinimumHeight(100)
         self.preview_lyric_label.setStyleSheet(
-            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 20px; font-weight: 700; color: #1E293B; "
-            "background-color: #FFFFFF; padding: 20px; border-radius: 8px; border: 1px solid #E2E8F0;"
+            "font-family: Inter, \"Segoe UI\", sans-serif; font-size: 28px; font-weight: 700; color: #FFFFFF; "
+            "background-color: #000000; padding: 20px; border-radius: 8px; border: 1px solid #475569;"
         )
         self._content_layout.addWidget(self.preview_lyric_label, 1)
 
@@ -179,38 +165,11 @@ class PreviewSection(QFrame):
 
         layout.addWidget(self._content, 1)
 
-    # ---------- 접기/펼치기 ----------
-
-    def expand(self) -> None:
-        self._content.setVisible(True)
-        self._content_layout.setSpacing(12)
-        self.layout().setSpacing(12)
-        self.layout().setContentsMargins(8, 8, 2, 8)
-        self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
-        self._title_btn.setText("▼ 재생 미리보기")
-        self._expanded = True
-        self.collapsed_changed.emit(False)
-
-    def collapse(self) -> None:
-        self._content.setVisible(False)
-        self._content_layout.setSpacing(0)
-        self.layout().setSpacing(0)
-        self.layout().setContentsMargins(8, 4, 8, 4)
-        self.setMaximumHeight(65)
-        self._title_btn.setText("▶ 재생 미리보기")
-        self._expanded = False
-        self.collapsed_changed.emit(True)
-
-    def toggle(self) -> None:
-        if self._expanded:
-            self.collapse()
-        else:
-            self.expand()
-
-    def is_expanded(self) -> bool:
-        return self._expanded
-
     # ---------- 편의 메서드 (메인 윈도우에서 호출) ----------
+
+    def show_placeholder(self) -> None:
+        """미리보기 가사 라벨에 흰색 제목을 표시한다."""
+        self.preview_lyric_label.setText("자막 미리보기")
 
     def set_lyric_text(self, text: str) -> None:
         """미리보기 가사 텍스트를 설정한다."""
@@ -222,7 +181,7 @@ class PreviewSection(QFrame):
 
     def clear(self) -> None:
         """가사와 시간 라벨을 비운다."""
-        self.preview_lyric_label.setText("")
+        self.preview_lyric_label.setText("자막 미리보기")
         self.preview_time_label.setText("0:00.00 / 0:00.00")
 
     def set_slider_range(self, minimum: int, maximum: int) -> None:

@@ -260,12 +260,14 @@ class AudioEditorPanel(QWidget):
         act_help.triggered.connect(self._show_help)
 
         # 상단 툴바
-        toolbar = QHBoxLayout()
-        btn_open1 = QPushButton("반주 열기")
+        self.toolbar_frame = QFrame()
+        toolbar = QHBoxLayout(self.toolbar_frame)
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        btn_open1 = QPushButton("보컬 열기")
         btn_open1.clicked.connect(lambda: self.open_track(1))
         btn_open1.setProperty("secondary", True)
         toolbar.addWidget(btn_open1)
-        btn_open2 = QPushButton("보컬 열기")
+        btn_open2 = QPushButton("반주 불러오기")
         btn_open2.clicked.connect(lambda: self.open_track(2))
         btn_open2.setProperty("secondary", True)
         toolbar.addWidget(btn_open2)
@@ -279,28 +281,75 @@ class AudioEditorPanel(QWidget):
         btn_stop.setProperty("secondary", True)
         toolbar.addWidget(btn_stop)
         toolbar.addSpacing(12)
-        self.time_label = QLabel("0.00 / 0.00")
-        self.time_label.setProperty("textColor", "secondary")
-        self.time_label.setStyleSheet("font-weight:700; font-size:14px;")
-        toolbar.addWidget(self.time_label)
+
+        # 편집 버튼들 (남기기 ~ 믹스 저장)을 상단 툴바로 이동
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setFixedWidth(72)
+        self.progress.setVisible(False)
+        toolbar.addWidget(self.progress)
+
+        btn_keep = QPushButton("선택 구간만 남기기")
+        btn_keep.setToolTip("선택 구간만 남기기")
+        btn_keep.clicked.connect(self.trim_keep)
+        btn_keep.setProperty("success", True)
+        toolbar.addWidget(btn_keep)
+        btn_export = QPushButton("구간 내보내기")
+        btn_export.setToolTip("선택 구간을 새 오디오 파일로 내보내기")
+        btn_export.clicked.connect(self.trim_export_selected)
+        btn_export.setProperty("success", True)
+        toolbar.addWidget(btn_export)
+        btn_norm = QPushButton("정규화")
+        btn_norm.setToolTip("볼륨 최대치에 맞춰 정규화")
+        btn_norm.clicked.connect(self.normalize_track)
+        btn_norm.setProperty("success", True)
+        toolbar.addWidget(btn_norm)
+        btn_fade = QPushButton("페이드")
+        btn_fade.setToolTip("페이드 인/아웃 적용")
+        btn_fade.clicked.connect(self.fade_in_out)
+        btn_fade.setProperty("success", True)
+        toolbar.addWidget(btn_fade)
+        btn_loop = QPushButton("구간 반복")
+        btn_loop.setToolTip("선택 구간 반복 재생")
+        btn_loop.clicked.connect(self.loop_play)
+        btn_loop.setProperty("success", True)
+        toolbar.addWidget(btn_loop)
+        btn_mix = QPushButton("믹스 미리보기")
+        btn_mix.setToolTip("반주와 보컬 믹싱 미리보기")
+        btn_mix.clicked.connect(self.mix_tracks)
+        toolbar.addWidget(btn_mix)
+
+        btn_save_res = QPushButton("믹스 미리보기 저장")
+        btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
+        btn_save_res.clicked.connect(self.save_result)
+        btn_save_res.setProperty("secondary", True)
+        toolbar.addWidget(btn_save_res)
+
         toolbar.addStretch(1)
         self.status = QLabel("")
         toolbar.addWidget(self.status)
-        layout.addLayout(toolbar)
+        layout.addWidget(self.toolbar_frame)
         self._top_toolbar = toolbar
         self.btn_open_vocal = btn_open2
-        self._compact_transport_controls = (btn_play, btn_stop, self.time_label, self.status)
+        self._compact_duplicate_controls = (btn_open1,)
 
-        # 재생 슬라이더
-        play_row = QHBoxLayout()
+        # 재생 슬라이더와 시간 표기는 파형 그래프 아래로 이동 (아래에서 추가)
+        self.time_label = QLabel("0.00 / 0.00")
+        self.time_label.setProperty("textColor", "secondary")
+        self.time_label.setStyleSheet("font-weight:700; font-size:14px;")
         self.play_slider = QSlider(Qt.Horizontal)
         self.play_slider.setRange(0, 1000)
         self.play_slider.setValue(0)
         self.play_slider.sliderMoved.connect(self._on_slider_moved)
-        play_row.addWidget(self.play_slider, 1)
-        layout.addLayout(play_row)
 
-        # 파형 + 트랙 헤더 그리드
+        self._compact_transport_controls = (btn_play, btn_stop, self.time_label, self.status)
+        self.trim_buttons = (
+            btn_keep, btn_export, btn_norm, btn_fade, btn_loop,
+            btn_mix, btn_save_res,
+        )
+
+
+    # (이하 _build_ui 계속: 파형 + 트랙 헤더 그리드)
         grid = QGridLayout()
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(4)
@@ -337,9 +386,9 @@ class AudioEditorPanel(QWidget):
         self._setup_plot(self.plot3, "#ddd6fe", "#0f172a")
 
         self.header1, self.vol1, self.mute1, self.solo1, self.info1, self.height1 = self._make_track_header(
-            "반주 (Track 1)", "#99f6e4", "#0f766e")
+            "보컬 (Track 1)", "#99f6e4", "#0f766e")
         self.header2, self.vol2, self.mute2, self.solo2, self.info2, self.height2 = self._make_track_header(
-            "보컬 (Track 2)", "#bfdbfe", "#1d4ed8")
+            "반주 (Track 2)", "#bfdbfe", "#1d4ed8")
         self.header3, self.vol3, self.mute3, self.solo3, self.info3, self.height3 = self._make_track_header(
             "믹싱 미리보기", "#ddd6fe", "#6d28d9")
         self.vol3.setEnabled(False)
@@ -404,6 +453,16 @@ class AudioEditorPanel(QWidget):
         layout.addLayout(grid, 1)
         self.plot3.setVisible(False)
         self.header3.setVisible(False)
+        # 2번 트랙(반주)은 기본 숨김 — 데이터가 불러와질 때만 표시한다.
+        self.plot2.setVisible(False)
+        self.header2.setVisible(False)
+        self._grid.setRowStretch(1, 0)
+
+        # 재생 슬라이더와 재생 시간 표기는 파형 그래프 아래에 배치한다.
+        play_row = QHBoxLayout()
+        play_row.addWidget(self.play_slider, 1)
+        play_row.addWidget(self.time_label)
+        layout.addLayout(play_row)
 
         # 선택 구간 (region)
         self.region1 = pg.LinearRegionItem([0, 1], brush=(59, 130, 246, 70), pen=pg.mkPen("#1d4ed8", width=1))
@@ -464,78 +523,8 @@ class AudioEditorPanel(QWidget):
         target_row.addWidget(self.lbl_selection)
         layout.addLayout(target_row)
 
-        # 트리밍
-        trim_frame = QFrame()
-        trim_frame.setFrameShape(QFrame.StyledPanel)
-        trim_frame.setProperty("section", True)
-        trim_layout = QHBoxLayout(trim_frame)
-        trim_layout.setSpacing(4)
-        trim_layout.setContentsMargins(6, 4, 6, 4)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setFixedWidth(72)
-        self.progress.setVisible(False)
-        trim_layout.addWidget(self.progress)
-
-        btn_keep = QPushButton("남기기")
-        btn_keep.setToolTip("선택 구간만 남기기")
-        btn_keep.clicked.connect(self.trim_keep)
-        btn_keep.setProperty("success", True)
-        trim_layout.addWidget(btn_keep)
-        btn_export = QPushButton("구간 내보내기")
-        btn_export.setToolTip("선택 구간을 새 오디오 파일로 내보내기")
-        btn_export.clicked.connect(self.trim_export_selected)
-        btn_export.setProperty("success", True)
-        trim_layout.addWidget(btn_export)
-        btn_norm = QPushButton("정규화")
-        btn_norm.setToolTip("볼륨 최대치에 맞춰 정규화")
-        btn_norm.clicked.connect(self.normalize_track)
-        btn_norm.setProperty("success", True)
-        trim_layout.addWidget(btn_norm)
-        btn_fade = QPushButton("페이드")
-        btn_fade.setToolTip("페이드 인/아웃 적용")
-        btn_fade.clicked.connect(self.fade_in_out)
-        btn_fade.setProperty("success", True)
-        trim_layout.addWidget(btn_fade)
-        btn_loop = QPushButton("반복")
-        btn_loop.setToolTip("선택 구간 반복 재생")
-        btn_loop.clicked.connect(self.loop_play)
-        btn_loop.setProperty("success", True)
-        trim_layout.addWidget(btn_loop)
-        btn_mix = QPushButton("믹스")
-        btn_mix.setToolTip("반주와 보컬 믹싱 미리보기")
-        btn_mix.clicked.connect(self.mix_tracks)
-        trim_layout.addWidget(btn_mix)
-
-        btn_save1 = QPushButton("트랙 1")
-        btn_save1.setToolTip("1번 트랙 저장")
-        btn_save1.clicked.connect(lambda: self.save_track(1))
-        btn_save1.setProperty("secondary", True)
-        trim_layout.addWidget(btn_save1)
-        btn_save2 = QPushButton("트랙 2")
-        btn_save2.setToolTip("2번 트랙 저장")
-        btn_save2.clicked.connect(lambda: self.save_track(2))
-        btn_save2.setProperty("secondary", True)
-        trim_layout.addWidget(btn_save2)
-        btn_save_both = QPushButton("분리 저장")
-        btn_save_both.setToolTip("두 트랙을 각각 저장")
-        btn_save_both.clicked.connect(self.save_both_tracks)
-        btn_save_both.setProperty("secondary", True)
-        trim_layout.addWidget(btn_save_both)
-        btn_save_res = QPushButton("믹스 저장")
-        btn_save_res.setToolTip("미리듣기용 파일입니다. 반주/보컬은 위의 트랙별 저장 버튼을 사용하세요.")
-        btn_save_res.clicked.connect(self.save_result)
-        btn_save_res.setProperty("secondary", True)
-        trim_layout.addWidget(btn_save_res)
-        trim_layout.addStretch(1)
-        layout.addWidget(trim_frame)
-
-        self.trim_buttons = (
-            btn_keep, btn_export, btn_norm, btn_fade, btn_loop,
-            btn_mix, btn_save1, btn_save2, btn_save_both, btn_save_res,
-        )
-        self._compact_duplicate_controls = (btn_open1,)
+        # (편집 버튼들은 상단 툴바로 이동됨)
+        layout.addStretch(0)
 
         # 마우스로 파형 드래그 선택
         self._selecting = False
@@ -543,6 +532,16 @@ class AudioEditorPanel(QWidget):
 
         # 초기 편집 대상 트랙 강조
         self._update_target_highlight()
+
+
+    def take_toolbar(self):
+        """툴바 프레임을 패널에서 분리하여 반환한다 (karaoke_gui에서 상단에 배치용)."""
+        if self.toolbar_frame is not None and self.toolbar_frame.parent() is not None:
+            parent_layout = self.toolbar_frame.parent().layout()
+            if parent_layout is not None:
+                parent_layout.removeWidget(self.toolbar_frame)
+        self.toolbar_frame.setParent(None)
+        return self.toolbar_frame
 
     def _setup_plot(self, plot, bg, wave_pen):
         plot.setBackground(bg)
@@ -651,6 +650,7 @@ class AudioEditorPanel(QWidget):
 
     def set_compact_mode(self, compact=True):
         self.menu_bar.setVisible(not compact)
+        self.toolbar_frame.setVisible(not compact)
         self.play_slider.setVisible(not compact)
         for control in self._compact_transport_controls:
             control.setVisible(not compact)
@@ -693,17 +693,24 @@ class AudioEditorPanel(QWidget):
         if which == 1:
             self.track1 = np.asarray(data) if data is not None else None
             self.sr1 = int(sr) if sr is not None else None
-            self._plot_track(self.plot1, self.track1, self.sr1, "반주 (Track 1)")
+            self._plot_track(self.plot1, self.track1, self.sr1, "보컬 (Track 1)")
             if self.track1 is not None:
                 dur = len(self.track1) / self.sr1
                 self.region1.setRegion((0, min(1.0, dur)))
         else:
             self.track2 = np.asarray(data) if data is not None else None
             self.sr2 = int(sr) if sr is not None else None
-            self._plot_track(self.plot2, self.track2, self.sr2, "보컬 (Track 2)")
+            self._plot_track(self.plot2, self.track2, self.sr2, "반주 (Track 2)")
             if self.track2 is not None:
                 dur = len(self.track2) / self.sr2
                 self.region2.setRegion((0, min(1.0, dur)))
+                self.plot2.setVisible(True)
+                self.header2.setVisible(True)
+                self._grid.setRowStretch(1, 1)
+            else:
+                self.plot2.setVisible(False)
+                self.header2.setVisible(False)
+                self._grid.setRowStretch(1, 0)
         if msg:
             self.status.setText(msg)
         # 스핀박스 값이 실제 선택 영역과 일치하도록 맞춘다.
@@ -811,9 +818,9 @@ class AudioEditorPanel(QWidget):
     def save_track(self, which):
         """1번(반주) 또는 2번(보컬) 트랙을 그대로 따로 저장한다."""
         if which == 1:
-            data, sr, src_path, name = self.track1, self.sr1, self.path1, "반주"
+            data, sr, src_path, name = self.track1, self.sr1, self.path1, "보컬"
         else:
-            data, sr, src_path, name = self.track2, self.sr2, self.path2, "보컬"
+            data, sr, src_path, name = self.track2, self.sr2, self.path2, "반주"
         if data is None:
             QMessageBox.warning(self, "경고", f"{which}번 트랙({name})이 비어 있습니다.")
             return
@@ -852,8 +859,8 @@ class AudioEditorPanel(QWidget):
         if os.path.isdir(folder):
             self._settings.setValue("last_save_dir", folder)
         targets = [
-            (os.path.join(folder, "반주_편집.wav"), self.track1, self.sr1),
-            (os.path.join(folder, "보컬_편집.wav"), self.track2, self.sr2),
+            (os.path.join(folder, "보컬_편집.wav"), self.track1, self.sr1),
+            (os.path.join(folder, "반주_편집.wav"), self.track2, self.sr2),
         ]
         existing = [p for p, _, _ in targets if os.path.exists(p)]
         if existing:

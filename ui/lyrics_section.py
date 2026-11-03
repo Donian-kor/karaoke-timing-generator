@@ -51,23 +51,60 @@ class LyricsSection(QFrame):
 
         self.btn_gen = QPushButton("타이밍 생성")
         self.btn_gen.clicked.connect(lambda: self.gen_clicked.emit())
-        self.btn_gen.setProperty("success", True)
+        self.btn_gen.setStyleSheet(
+            "QPushButton { background-color: #7C3AED; color: white; font-weight: 700; "
+            "border: none; border-radius: 4px; padding: 6px 16px; min-height: 28px; }"
+            "QPushButton:hover { background-color: #6D28D9; }"
+            "QPushButton:pressed { background-color: #5B21B6; padding-top: 7px; padding-bottom: 5px; }")
         self.btn_gen.setFixedWidth(120)
         title_row.addWidget(self.btn_gen)
-
-        self.btn_audio_edit = QPushButton("🎧 오디오 편집")
-        self.btn_audio_edit.clicked.connect(lambda: self.audio_edit_clicked.emit())
-        self.btn_audio_edit.setProperty("success", True)
-        self.btn_audio_edit.setStyleSheet("font-weight: 700; min-width: 80px;")
-        self.btn_audio_edit.setToolTip("멀티트랙 오디오 편집기 열기")
-        self.btn_audio_edit.setFixedWidth(140)
-        title_row.addWidget(self.btn_audio_edit)
 
         self.btn_denoise = QPushButton("잡음 제거")
         self.btn_denoise.clicked.connect(lambda: self.denoise_clicked.emit())
         self.btn_denoise.setProperty("secondary", True)
         self.btn_denoise.setFixedWidth(120)
         title_row.addWidget(self.btn_denoise)
+
+        # 싱크 컨트롤 (노래 시작 자동 맞춤, 선택 줄 맞춤, 전체 줄 맞춤)을 제목 행 우측에 배치
+        title_row.addSpacing(12)
+
+        self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
+        self.btn_auto_offset.setToolTip(
+            "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
+        self.btn_auto_offset.clicked.connect(lambda: self.auto_offset_clicked.emit())
+        title_row.addWidget(self.btn_auto_offset)
+
+        self.line_offset_spin = QSpinBox()
+        self.line_offset_spin.setRange(-5000, 5000)
+        self.line_offset_spin.setSingleStep(10)
+        self.line_offset_spin.setValue(0)
+        self.line_offset_spin.setFixedWidth(80)
+        self.line_offset_spin.setStyleSheet(
+            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        title_row.addWidget(self.line_offset_spin)
+
+        self.btn_line_offset = QPushButton("선택 줄 맞춤")
+        self.btn_line_offset.setToolTip(
+            "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
+        self.btn_line_offset.clicked.connect(lambda: self.line_offset_clicked.emit())
+        self.btn_line_offset.setProperty("secondary", True)
+        title_row.addWidget(self.btn_line_offset)
+
+        title_row.addSpacing(12)
+
+        self.offset_spin = QSpinBox()
+        self.offset_spin.setRange(-5000, 5000)
+        self.offset_spin.setSingleStep(10)
+        self.offset_spin.setValue(0)
+        self.offset_spin.setFixedWidth(80)
+        self.offset_spin.setStyleSheet(
+            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
+        title_row.addWidget(self.offset_spin)
+
+        self.btn_offset = QPushButton("전체 줄 맞춤")
+        self.btn_offset.clicked.connect(lambda: self.offset_clicked.emit())
+        self.btn_offset.setProperty("secondary", True)
+        title_row.addWidget(self.btn_offset)
 
         layout.addLayout(title_row)
 
@@ -127,46 +164,6 @@ class LyricsSection(QFrame):
         self.btn_revert.clicked.connect(lambda: self.revert_clicked.emit())
         self.btn_revert.setProperty("secondary", True)
         btns_layout.addWidget(self.btn_revert)
-
-        self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
-        self.btn_auto_offset.setToolTip(
-            "노래가 처음 시작하는 지점을 찾아서 가사 시간을 자동으로 맞춥니다.")
-        self.btn_auto_offset.clicked.connect(lambda: self.auto_offset_clicked.emit())
-        btns_layout.addWidget(self.btn_auto_offset)
-
-        btns_layout.addSpacing(12)
-
-        self.line_offset_spin = QSpinBox()
-        self.line_offset_spin.setRange(-5000, 5000)
-        self.line_offset_spin.setSingleStep(10)
-        self.line_offset_spin.setValue(0)
-        self.line_offset_spin.setFixedWidth(80)
-        self.line_offset_spin.setStyleSheet(
-            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        btns_layout.addWidget(self.line_offset_spin)
-
-        self.btn_line_offset = QPushButton("선택 줄 맞춤")
-        self.btn_line_offset.setToolTip(
-            "편집창에서 커서가 있는 줄(또는 선택한 줄)의 시간만 개별로 맞춥니다.")
-        self.btn_line_offset.clicked.connect(lambda: self.line_offset_clicked.emit())
-        self.btn_line_offset.setProperty("secondary", True)
-        btns_layout.addWidget(self.btn_line_offset)
-
-        btns_layout.addSpacing(12)
-
-        self.offset_spin = QSpinBox()
-        self.offset_spin.setRange(-5000, 5000)
-        self.offset_spin.setSingleStep(10)
-        self.offset_spin.setValue(0)
-        self.offset_spin.setFixedWidth(80)
-        self.offset_spin.setStyleSheet(
-            "QSpinBox::up-button, QSpinBox::down-button { width: 16px; }")
-        btns_layout.addWidget(self.offset_spin)
-
-        self.btn_offset = QPushButton("전체 줄 맞춤")
-        self.btn_offset.clicked.connect(lambda: self.offset_clicked.emit())
-        self.btn_offset.setProperty("secondary", True)
-        btns_layout.addWidget(self.btn_offset)
 
         btns_layout.addStretch(1)
         layout.addLayout(btns_layout)

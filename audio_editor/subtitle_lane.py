@@ -83,7 +83,7 @@ class _SubtitleLane(QWidget):
         return -1
 
     def _paint_block(self, painter, font_metrics, start, end, y, height, text,
-                     active=False, dragging=False, word=False):
+                     active=False, dragging=False, word=False, block_type="line"):
         x1 = self._time_to_x(start)
         x2 = self._time_to_x(end)
         if x2 < 0 or x1 > self.width():
@@ -95,18 +95,26 @@ class _SubtitleLane(QWidget):
         if right - left < 2.0:
             right = left + 2.0
         rect = QtCore.QRectF(left, float(y), right - left, float(height))
-        if dragging:
-            painter.fillRect(rect, QColor("#f59e0b"))
-            painter.setPen(QColor("#0f172a"))
-        elif active:
-            painter.fillRect(rect, QColor("#fbbf24"))
-            painter.setPen(QColor("#0f172a"))
-        elif word:
-            painter.fillRect(rect, QColor("#334155"))
-            painter.setPen(QColor("#e2e8f0"))
-        else:
-            painter.fillRect(rect, QColor("#1e293b"))
-            painter.setPen(QColor("#cbd5e1"))
+        if block_type == "word":
+            if dragging:
+                painter.fillRect(rect, QColor("#f59e0b"))
+                painter.setPen(QColor("#0f172a"))
+            elif active:
+                painter.fillRect(rect, QColor("#fbbf24"))
+                painter.setPen(QColor("#0f172a"))
+            else:
+                painter.fillRect(rect, QColor("#334155"))
+                painter.setPen(QColor("#e2e8f0"))
+        else:  # "line" block type
+            if dragging:
+                painter.fillRect(rect, QColor("#3b82f6"))
+                painter.setPen(QColor("#ffffff"))
+            elif active:
+                painter.fillRect(rect, QColor("#60a5fa"))
+                painter.setPen(QColor("#1e293b"))
+            else:
+                painter.fillRect(rect, QColor("#64748b"))
+                painter.setPen(QColor("#f8fafc"))
         if rect.width() > 8:
             shown = font_metrics.elidedText(text, Qt.ElideRight, int(rect.width()) - 6)
             painter.drawText(rect.adjusted(3.0, 0.0, -3.0, 0.0),
@@ -122,11 +130,13 @@ class _SubtitleLane(QWidget):
 
         for index, entry in enumerate(self.entries):
             active = entry["start"] <= self.playhead < entry["end"]
+            # 라인 블록 [시간]은 block_type="line", 단어 블록 <시간>은 block_type="word"
             self._paint_block(
                 painter, font_metrics, entry["start"], entry["end"],
                 self.LINE_Y, self.LINE_H, entry["text"],
                 active=active,
                 dragging=(self._drag_kind == "line" and self._drag_index == index),
+                block_type="line",
             )
 
         if self._has_words:
@@ -142,7 +152,7 @@ class _SubtitleLane(QWidget):
                         dragging=(self._drag_kind == "word"
                                   and self._drag_index == index
                                   and self._drag_word == word_index),
-                        word=True,
+                        block_type="word",
                     )
         painter.end()
 
