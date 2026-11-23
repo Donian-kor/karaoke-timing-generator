@@ -21,7 +21,7 @@ from PySide6.QtMultimedia import QMediaPlayer
 from ui.design_tokens import DESIGN_TOKENS, _build_design_qss, _apply_design_system
 from .subtitle_lane import _SubtitleLane
 from .playback_engine import PlaybackEngine
-from .track_worker import _LoadTrackWorker
+from .track_worker import _LoadTrackWorker, _MixWorker
 from .waveform import _SelectablePlot
 
 import pyqtgraph as pg
@@ -403,12 +403,17 @@ class AudioEditorPanel(QWidget):
         self._setup_plot(self.plot2, "#bfdbfe", "#0f172a")
         self._setup_plot(self.plot3, "#ddd6fe", "#0f172a")
 
-        self.header1, self.vol1, self.mute1, self.solo1, self.info1, self.height1 = self._make_track_header(
+        self.header1, self.vol1, self.mute1, self.solo1, self.info1, self.height1, _ = self._make_track_header(
             "보컬 (Track 1)", "#99f6e4", "#0f766e", show_info=False)
-        self.header2, self.vol2, self.mute2, self.solo2, self.info2, self.height2 = self._make_track_header(
-            "반주 (Track 2)", "#bfdbfe", "#1d4ed8", show_info=False)
-        self.header3, self.vol3, self.mute3, self.solo3, self.info3, self.height3 = self._make_track_header(
-            "믹싱 미리보기", "#ddd6fe", "#6d28d9")
+        self.header2, self.vol2, self.mute2, self.solo2, self.info2, self.height2, self.close2 = self._make_track_header(
+            "반주 (Track 2)", "#bfdbfe", "#1d4ed8", show_info=False, closable=True)
+        self.header3, self.vol3, self.mute3, self.solo3, self.info3, self.height3, self.close3 = self._make_track_header(
+            "믹싱 미리보기", "#ddd6fe", "#6d28d9", closable=True)
+        # 닫기 버트 연결
+        if self.close2 is not None:
+            self.close2.clicked.connect(lambda: self._close_track(2))
+        if self.close3 is not None:
+            self.close3.clicked.connect(lambda: self._close_track(3))
         self.vol3.setEnabled(False)
         self.mute3.setEnabled(False)
         self.solo3.setEnabled(False)
@@ -639,7 +644,7 @@ class AudioEditorPanel(QWidget):
         plot.getAxis("left").setPen(pg.mkPen("#334155"))
         plot.getAxis("bottom").setPen(pg.mkPen("#334155"))
 
-    def _make_track_header(self, title, bg, accent, show_info=True):
+    def _make_track_header(self, title, bg, accent, show_info=True, closable=False):
         frame = QFrame()
         frame.setStyleSheet(
             f"QFrame {{ background: {bg}; border: 1px solid {accent}; border-radius: 6px; }}")
@@ -647,9 +652,28 @@ class AudioEditorPanel(QWidget):
         v = QVBoxLayout(frame)
         v.setContentsMargins(6, 6, 6, 6)
         v.setSpacing(3)
+
+        # 제목 행 (제목 + 닫기 버튼)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
         name = QLabel(title)
         name.setStyleSheet(f"color: {accent}; font-weight: 700; border: none;")
-        v.addWidget(name)
+        title_row.addWidget(name)
+        title_row.addStretch(1)
+        close_btn = None
+        if closable:
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(20, 20)
+            close_btn.setToolTip("이 트랙 닫기 (숨기기)")
+            close_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #64748B; font-weight: 700; "
+                "border: none; padding: 0; min-height: 20px; }"
+                "QPushButton:hover { color: #DC2626; background: #FEE2E2; border-radius: 4px; }"
+            )
+            title_row.addWidget(close_btn)
+            self._close_buttons = getattr(self, "_close_buttons", {})
+            self._close_buttons[title] = close_btn
+        v.addLayout(title_row)
 
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(4)
@@ -723,7 +747,8 @@ class AudioEditorPanel(QWidget):
             info = QLabel("(없음)")
             info.setProperty("textColor", "secondary")
             v.addWidget(info)
-        return frame, vol, mute, solo, info, height
+        close_btn = close_btn if closable else None
+        return frame, vol, mute, solo, info, height, close_btn
 
     def _show_help(self):
         """도움말 다이얼로그를 표시한다."""
@@ -786,6 +811,26 @@ class AudioEditorPanel(QWidget):
         self._top_toolbar.removeWidget(self.btn_open_instrumental)
         self.btn_open_instrumental.setVisible(True)
         return self.btn_open_instrumental
+
+    def _close_track(self, track):
+        """트랙 2/3을 닫아(숨겨) 화면에서 제거한다."""
+        if track == 2:
+            self.track2 = None
+            self.sr2 = None
+            self.path2 = None
+            if self.info2 is not None:
+                self.info2.setText("(없음)")
+            self.plot2.setVisible(False)
+            self.header2.setVisible(False)
+            self._grid.setRowStretch(1, 0)
+            self.status.setText("2번 트랙을 닫았습니다.")
+        elif track == 3:
+            self.result = None
+            self.result_sr = None
+            self.plot3.setVisible(False)
+            self.header3.setVisible(False)
+            self._grid.setRowStretch(2, 0)
+            self.status.setText("3번 트랙(믹싱 미리보기)을 닫았습니다.")
 
     def _update_target_highlight(self):
         """현재 편집 대상 트랙의 파형에 강조 테두리를 입힌다."""
@@ -986,8 +1031,14 @@ class AudioEditorPanel(QWidget):
         if os.path.isdir(os.path.dirname(path)):
             self._settings.setValue("last_save_dir", os.path.dirname(path))
         try:
-            # 다른 트랙과 섞지 않고, 이 트랙의 원래 샘플레이트 그대로 저장한다.
-            sf.write(path, data, sr)
+            # 음질 보존: WAV는 32비트 float, FLAC은 24비트 PCM으로 저장한다.
+            ext = os.path.splitext(path)[1].lower()
+            if ext == ".wav":
+                sf.write(path, data, sr, subtype='FLOAT')
+            elif ext == ".flac":
+                sf.write(path, data, sr, subtype='PCM_24')
+            else:
+                sf.write(path, data, sr)
             self.status.setText(f"{which}번 트랙({name}) 저장 완료: {path}")
         except Exception as e:
             QMessageBox.critical(self, "오류", f"저장 실패:\n{e}")
@@ -1016,8 +1067,14 @@ class AudioEditorPanel(QWidget):
                 return
         try:
             for p, data, sr in targets:
-                # 각 트랙을 원래 샘플레이트 그대로 저장 (믹싱하지 않음)
-                sf.write(p, data, sr)
+                # 음질 보존: WAV는 32비트 float, FLAC은 24비트 PCM으로 저장한다.
+                ext = os.path.splitext(p)[1].lower()
+                if ext == ".wav":
+                    sf.write(p, data, sr, subtype='FLOAT')
+                elif ext == ".flac":
+                    sf.write(p, data, sr, subtype='PCM_24')
+                else:
+                    sf.write(p, data, sr)
         except Exception as e:
             QMessageBox.critical(self, "오류", f"저장 실패:\n{e}")
             return
@@ -1035,8 +1092,22 @@ class AudioEditorPanel(QWidget):
             self, "믹스 미리보기 저장", "믹스_미리보기.wav", "WAV (*.wav);;FLAC (*.flac);;MP3 (*.mp3);;OGG (*.ogg)")
         if not path:
             return
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".mp3", ".ogg"):
+            ret = QMessageBox.question(
+                self, "손실 포맷 경고",
+                "MP3/OGG는 손실 압축 포맷입니다. 음질 보존을 위해 WAV 또는 FLAC을 권장합니다.\n\n계속하시겠습니까?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if ret != QMessageBox.StandardButton.Yes:
+                return
         try:
-            sf.write(path, self.result, self.result_sr)
+            # 음질 보존: WAV는 32비트 float, FLAC은 24비트 PCM으로 저장한다.
+            if ext == ".wav":
+                sf.write(path, self.result, self.result_sr, subtype='FLOAT')
+            elif ext == ".flac":
+                sf.write(path, self.result, self.result_sr, subtype='PCM_24')
+            else:
+                sf.write(path, self.result, self.result_sr)
             self.status.setText(f"믹스 미리보기 저장 완료: {path}")
         except Exception as e:
             QMessageBox.critical(self, "오류", f"저장 실패:\n{e}")
@@ -1311,8 +1382,10 @@ class AudioEditorPanel(QWidget):
         except Exception:
             pass
         self._update_subtitles(position_sec)
-        # 시간 라벨
-        self.time_label.setText(f"{position_sec:.2f} / {timeline_total_sec:.2f}")
+        # 시간 라벨 (LRC 편집과 동일한 mm:ss.cc 형식)
+        self.time_label.setText(
+            f"{self._fmt_lrc_ts(position_sec)} / {self._fmt_lrc_ts(timeline_total_sec)}"
+        )
         self.position_changed.emit(position_sec, timeline_total_sec)
 
     def _on_media_status(self, status):
@@ -1377,8 +1450,10 @@ class AudioEditorPanel(QWidget):
         for ph in (self.playhead1, self.playhead2, self.playhead3):
             ph.setPos(0)
         timeline_total_sec = self._timeline_total_sec or self._play_total_sec
+        zero = self._fmt_lrc_ts(0.0)
         self.time_label.setText(
-            f"0.00 / {timeline_total_sec:.2f}" if timeline_total_sec else "0.00 / 0.00"
+            f"{zero} / {self._fmt_lrc_ts(timeline_total_sec)}" if timeline_total_sec
+            else f"{zero} / {zero}"
         )
         self.status.setText("정지")
         self._update_subtitles(0.0)
@@ -1789,42 +1864,27 @@ class AudioEditorPanel(QWidget):
     # ---------- 믹싱 ----------
     def mix_tracks(self):
         if self.track1 is None or self.track2 is None:
-            QMessageBox.warning(self, "경고", "반주와 보컬을 모두 불러오세요.")
+            QMessageBox.warning(self, "경고", "반주와 보 vocal을 모두 불러오세요.")
             return
-        d1 = self.track1.copy()
-        d2 = _resample(self.track2, self.sr2, self.sr1)
-        # 채널 수 맞추기
-        if np.ndim(d1) != np.ndim(d2):
-            if np.ndim(d1) == 1 and np.ndim(d2) == 2:
-                d1 = np.column_stack([d1, d1])
-            elif np.ndim(d2) == 1 and np.ndim(d1) == 2:
-                d2 = np.column_stack([d2, d2])
-        # 길이 맞추기 (긴 쪽에 패딩)
-        n = max(d1.shape[0], d2.shape[0])
-        if d1.shape[0] < n:
-            pad = n - d1.shape[0]
-            if np.ndim(d1) == 1:
-                d1 = np.concatenate([d1, np.zeros(pad, dtype=d1.dtype)])
-            else:
-                d1 = np.concatenate([d1, np.zeros((pad, d1.shape[1]), dtype=d1.dtype)], axis=0)
-        if d2.shape[0] < n:
-            pad = n - d2.shape[0]
-            if np.ndim(d2) == 1:
-                d2 = np.concatenate([d2, np.zeros(pad, dtype=d2.dtype)])
-            else:
-                d2 = np.concatenate([d2, np.zeros((pad, d2.shape[1]), dtype=d2.dtype)], axis=0)
+        # 이미 믹싱 중이면 무시
+        if getattr(self, "_mix_worker", None) is not None and self._mix_worker.isRunning():
+            return
         # 볼륨/M/S 반영 (솔로가 켜져 있으면 반대 트랙은 묵음)
         solo1 = self.solo1.isChecked()
         solo2 = self.solo2.isChecked()
         v1 = 0.0 if (self.mute1.isChecked() or (solo2 and not solo1)) else self.vol1.value() / 100.0
         v2 = 0.0 if (self.mute2.isChecked() or (solo1 and not solo2)) else self.vol2.value() / 100.0
-        mixed = d1 * v1 + d2 * v2
-        peak = np.max(np.abs(mixed)) if mixed.size else 1.0
-        if peak > 0.99:
-            mixed = mixed * (0.99 / peak)
-        mixed = mixed.astype(np.float32)
+        self.status.setText("믹싱 중...")
+        self.progress.setVisible(True)
+        self._mix_worker = _MixWorker(self.track1, self.sr1, self.track2, self.sr2, v1, v2)
+        self._mix_worker.finished.connect(self._on_mix_finished)
+        self._mix_worker.failed.connect(self._on_mix_failed)
+        self._mix_worker.start()
+
+    def _on_mix_finished(self, mixed, sr):
+        self.progress.setVisible(False)
         self.result = mixed
-        self.result_sr = self.sr1
+        self.result_sr = sr
         # 결과 플롯 표시 (미리보기 전용: 원본 track1/track2는 변경하지 않는다)
         self._plot_track(self.plot3, mixed, self.result_sr, "믹싱 미리보기 (저장용 아님)")
         self.plot3.setVisible(self._waveforms_visible)
@@ -1832,6 +1892,12 @@ class AudioEditorPanel(QWidget):
         self._grid.setRowStretch(2, 1)
         self.info3.setText(f"길이 {len(mixed)/self.result_sr:.2f}초")
         self.status.setText("믹싱 완료 — 미리보기일 뿐, 원본 트랙은 그대로 유지됩니다")
+        self._mix_worker = None
+
+    def _on_mix_failed(self, msg):
+        self.progress.setVisible(False)
+        self.status.setText(f"믹싱 실패: {msg}")
+        self._mix_worker = None
 
     def keyPressEvent(self, ev):
         """다이얼로그에 포커스가 있을 때도 Del/Ctrl+Z가 동작하도록 한다."""
@@ -1856,6 +1922,11 @@ class AudioEditorPanel(QWidget):
         for worker in workers:
             worker.wait()
         self._load_workers.clear()
+        # 믹싱 워커도 정리한다.
+        mw = getattr(self, "_mix_worker", None)
+        if mw is not None:
+            mw.wait(5000)
+            self._mix_worker = None
         self.progress.setVisible(False)
         self._playback_engine.cleanup()
 

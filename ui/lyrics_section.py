@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QSplitter, QWidget,
     QLabel, QPushButton, QTextEdit, QSpinBox, QComboBox, QSizePolicy,
+    QProgressBar, QCheckBox,
 )
 
 
@@ -36,6 +37,8 @@ class LyricsSection(QFrame):
     denoise_clicked = Signal()
     song_selected = Signal(int)
     song_refresh_clicked = Signal()
+    undo_clicked = Signal()
+    redo_clicked = Signal()
     settings_changed = Signal()
 
     def __init__(self, parent=None):
@@ -55,24 +58,6 @@ class LyricsSection(QFrame):
         title = QLabel("가사 / LRC 편집")
         title.setProperty("sectionTitle", True)
         title_row.addWidget(title)
-
-        title_row.addSpacing(8)
-        title_row.addWidget(QLabel("ACE-Step 곡:"))
-        self.song_combo = QComboBox()
-        self.song_combo.setStyleSheet(
-            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
-            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
-        )
-        self.song_combo.addItem("(직접 입력)")
-        self.song_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.song_combo.setMinimumContentsLength(12)
-        self.song_combo.currentIndexChanged.connect(lambda idx: self.song_selected.emit(idx))
-        title_row.addWidget(self.song_combo, 1)
-        self.btn_refresh_song = QPushButton("새로고침")
-        self.btn_refresh_song.setMinimumWidth(100)
-        self.btn_refresh_song.setProperty("secondary", True)
-        self.btn_refresh_song.clicked.connect(lambda: self.song_refresh_clicked.emit())
-        title_row.addWidget(self.btn_refresh_song)
 
         title_row.addStretch(1)
 
@@ -95,6 +80,19 @@ class LyricsSection(QFrame):
 
         # 싱크 컨트롤 (노래 시작 자동 맞춤, 선택 줄 맞춤, 전체 줄 맞춤)을 제목 행 우측에 배치
         title_row.addSpacing(12)
+
+        # 타이밍 생성 시 구조/시작점 보정을 켜고 끄는 체크박스
+        self.chk_refine_timing = QCheckBox("타이밍 보정")
+        self.chk_refine_timing.setChecked(True)
+        self.chk_refine_timing.setToolTip(
+            "타이밍 생성 시 실제 발성 구절/온셋에 맞춰 줄 시작점을 보정합니다.\n"
+            "해제하면 Qwen 정렬 결과를 보정 없이 그대로 사용합니다.")
+        self.chk_refine_timing.setStyleSheet(
+            "QCheckBox { font-weight: 600; spacing: 6px; padding: 4px 2px; }"
+            "QCheckBox:checked { color: #0F766E; font-weight: 800; }"
+            "QCheckBox:unchecked { color: #94A3B8; }"
+        )
+        title_row.addWidget(self.chk_refine_timing)
 
         self.btn_auto_offset = QPushButton("노래 시작 자동 맞춤")
         self.btn_auto_offset.setToolTip(
@@ -135,6 +133,30 @@ class LyricsSection(QFrame):
         title_row.addWidget(self.btn_offset)
 
         layout.addLayout(title_row)
+
+        # ── ACE-Step 곡 선택 행 (가로 폭을 넓게) ──
+        song_row = QHBoxLayout()
+        song_row.setSpacing(6)
+        song_label = QLabel("ACE-Step 곡:")
+        song_row.addWidget(song_label)
+        self.song_combo = QComboBox()
+        self.song_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
+        self.song_combo.addItem("(직접 입력)")
+        self.song_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.song_combo.setMinimumContentsLength(30)
+        self.song_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.song_combo.view().setMinimumWidth(480)
+        self.song_combo.currentIndexChanged.connect(lambda idx: self.song_selected.emit(idx))
+        song_row.addWidget(self.song_combo, 1)
+        self.btn_refresh_song = QPushButton("새로고침")
+        self.btn_refresh_song.setMinimumWidth(100)
+        self.btn_refresh_song.setProperty("secondary", True)
+        self.btn_refresh_song.clicked.connect(lambda: self.song_refresh_clicked.emit())
+        song_row.addWidget(self.btn_refresh_song)
+        layout.addLayout(song_row)
 
         # ── 좌우 스플리터 ──
         split = QSplitter(Qt.Horizontal)
@@ -193,7 +215,29 @@ class LyricsSection(QFrame):
         self.btn_revert.setProperty("secondary", True)
         btns_layout.addWidget(self.btn_revert)
 
+        self.btn_undo = QPushButton("되돌리기")
+        self.btn_undo.setProperty("secondary", True)
+        self.btn_undo.clicked.connect(lambda: self.undo_clicked.emit())
+        btns_layout.addWidget(self.btn_undo)
+
+        self.btn_redo = QPushButton("다시 실행")
+        self.btn_redo.setProperty("secondary", True)
+        self.btn_redo.clicked.connect(lambda: self.redo_clicked.emit())
+        btns_layout.addWidget(self.btn_redo)
+
         btns_layout.addStretch(1)
+        # 경과 시간 표시 (진행률 바 왼쪽)
+        self.elapsed_label = QLabel("00분00초")
+        self.elapsed_label.setFixedWidth(70)
+        self.elapsed_label.setAlignment(Qt.AlignCenter)
+        self.elapsed_label.setStyleSheet("font-weight: 700; color: #374151;")
+        btns_layout.addWidget(self.elapsed_label)
+        # 진행률 표시 (타이밍 생성 버튼 왼쪽)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setVisible(False)
+        self.progress.setFixedWidth(160)
+        btns_layout.addWidget(self.progress)
         # 타이밍 생성 버튼을 다른 버튼들과 같은 줄 우측 끝에 배치, 펄스 애니메이션 적용
         btns_layout.addWidget(self.btn_gen)
         layout.addLayout(btns_layout)
@@ -202,6 +246,7 @@ class LyricsSection(QFrame):
 
     def move_offset_controls_to(self, layout):
         controls = (
+            self.chk_refine_timing,
             self.btn_auto_offset,
             self.line_offset_spin,
             self.btn_line_offset,
@@ -214,6 +259,8 @@ class LyricsSection(QFrame):
 
     def set_generating(self, generating: bool) -> None:
         """생성 중 상태에 따라 버튼 텍스트와 색상을 토글한다."""
+        # 생성 중에는 보정 옵션을 잠가 실행 중 변경이 적용되지 않는 혼동을 막는다.
+        self.chk_refine_timing.setEnabled(not generating)
         if generating:
             if hasattr(self, '_gen_pulse_timer'):
                 self._gen_pulse_timer.stop()
@@ -282,6 +329,10 @@ class LyricsSection(QFrame):
 
     def get_song_text(self) -> str:
         return self.song_combo.currentText()
+
+    def is_refine_timing_enabled(self) -> bool:
+        """타이밍 생성 시 구조/시작점 보정 사용 여부."""
+        return self.chk_refine_timing.isChecked()
 
     # ---------- 잡음 제거 버튼 분리 ----------
     def take_denoise(self):

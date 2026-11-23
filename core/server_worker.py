@@ -11,7 +11,7 @@ import requests
 from PySide6.QtCore import QThread, Signal
 
 # STT 서버 주소
-SERVER_URL = "http://127.0.0.1:8000"
+SERVER_URL = "http://127.0.0.1:8001"
 
 
 class ServerStartWorker(QThread):
@@ -19,12 +19,15 @@ class ServerStartWorker(QThread):
 
     finished = Signal(bool, str)
 
-    def __init__(self, python_exe, script_dir, model_name, compute_type):
+    def __init__(self, python_exe, script_dir, model_name, compute_type,
+                 transcription_engine="qwen-asr", timing_engine="qwen-forced-aligner"):
         super().__init__()
         self.python_exe = python_exe
         self.script_dir = script_dir
         self.model_name = model_name
         self.compute_type = compute_type
+        self.transcription_engine = transcription_engine
+        self.timing_engine = timing_engine
         self.proc = None
 
     def run(self):
@@ -33,11 +36,13 @@ class ServerStartWorker(QThread):
         env = dict(os.environ)
         env["MODEL_NAME"] = self.model_name
         env["COMPUTE_TYPE"] = self.compute_type.split()[0]
+        env["TRANSCRIPTION_ENGINE"] = self.transcription_engine
+        env["TIMING_ENGINE"] = self.timing_engine
         err_file = os.path.join(tempfile.gettempdir(), "stt_server_err.log")
         try:
             with open(err_file, "w") as ef:
                 self.proc = subprocess.Popen(
-                    [self.python_exe, "-m", "uvicorn", "stt_server:app", "--host", "127.0.0.1", "--port", "8000"],
+                    [self.python_exe, "-m", "uvicorn", "stt_server:app", "--host", "127.0.0.1", "--port", "8001"],
                     cwd=self.script_dir,
                     env=env,
                     stdout=ef,
@@ -49,7 +54,7 @@ class ServerStartWorker(QThread):
         for i in range(120):
             time.sleep(1)
             try:
-                r = requests.get("http://127.0.0.1:8000/health", timeout=2)
+                r = requests.get("http://127.0.0.1:8001/health", timeout=2)
                 if r.status_code == 200:
                     self.finished.emit(True, "")
                     return
@@ -77,15 +82,21 @@ class ServerStartWorker(QThread):
 class HealthCheckWorker(QThread):
     """서버 상태 확인을 백그라운드에서 수행해 UI 블로킹을 막습니다."""
 
-    finished = Signal(bool, str, str)  # (ok, model, compute_type)
+    finished = Signal(bool, str, str, str, str)  # (ok, model, compute_type, transcription_engine, timing_engine)
 
     def run(self):
         try:
             r = requests.get(f"{SERVER_URL}/health", timeout=2)
             if r.status_code == 200:
                 info = r.json()
-                self.finished.emit(True, info.get("model", ""), info.get("compute_type", ""))
+                self.finished.emit(
+                    True,
+                    info.get("model", ""),
+                    info.get("compute_type", ""),
+                    info.get("transcription_engine", ""),
+                    info.get("timing_engine", ""),
+                )
                 return
         except Exception:
             pass
-        self.finished.emit(False, "", "")
+        self.finished.emit(False, "", "", "", "")

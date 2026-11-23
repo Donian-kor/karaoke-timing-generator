@@ -70,6 +70,35 @@ def lrc_to_plain_text(lrc):
     return "\n".join(lines)
 
 
+def sync_plain_lrc_text(lrc_text: str, new_lyrics) -> str:
+    """단순 LRC의 가사만 새 가사로 교체한다 (타임코드는 유지).
+
+    Enhanced LRC(단어 태그 포함)는 생성된 타이밍 편집 결과이므로 그대로 돌려준다.
+    가사 줄 수와 LRC 줄 수가 다르면 대응 관계가 깨지므로 아무것도 바꾸지 않는다.
+    """
+    if not lrc_text or not lrc_text.strip():
+        return lrc_text
+
+    # 단어 태그가 있으면 사용자가 편집한 타이밍 결과이므로 보존한다.
+    if "<" in lrc_text:
+        return lrc_text
+
+    lyrics = [line.strip() for line in new_lyrics if line and line.strip()]
+    if not lyrics:
+        return lrc_text
+
+    stamps = []
+    for raw in lrc_text.splitlines():
+        m = re.match(r"^\s*\[(\d+):(\d+)\.(\d+)\]", raw)
+        if m:
+            stamps.append(m.group(0).strip())
+
+    if len(stamps) != len(lyrics):
+        return lrc_text
+
+    return "\n".join(f"{ts} {text}" for ts, text in zip(stamps, lyrics))
+
+
 def parse_lrc(text):
     """LRC 텍스트를 (start, display, lyric) 튜플 리스트로 파싱한다."""
     lines = []

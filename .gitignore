@@ -20,3 +20,6 @@ Thumbs.db
 
 # Local settings (user-specific)
 settings.json
+
+# Model cache (Hugging Face / Qwen / Whisper, 수 GB 단위)
+models/

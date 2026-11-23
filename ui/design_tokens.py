@@ -249,6 +249,32 @@ def _build_design_qss() -> str:
             border-color: {c['primary']};
         }}
 
+        /* ── 메뉴 ── */
+        QMenu {{
+            background-color: {c['surface']};
+            border: 1px solid {c['outline-variant']};
+            padding: 4px;
+            min-width: 220px;
+        }}
+        QMenu::item {{
+            padding: 6px 40px 6px 12px;
+            min-width: 160px;
+            border-radius: {r['sm']}px;
+            color: {c['on-surface']};
+        }}
+        QMenu::item:selected {{
+            background-color: {c['surface-container-high']};
+            color: {c['primary']};
+        }}
+        QMenu::item:disabled {{
+            color: {c['on-surface-variant']};
+        }}
+        QMenu::separator {{
+            height: 1px;
+            background-color: {c['outline-variant']};
+            margin: 4px 8px;
+        }}
+
         /* ── 스크롤바 ── */
         QScrollBar:vertical {{
             background: {c['surface-container-low']};

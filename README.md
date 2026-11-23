@@ -1,15 +1,17 @@
 # karaoke-timing-generator
 
-로컬 Whisper(STT) 서버로 오디오에서 **노래방 타이밍(.lrc)**을 생성하고, ACE-Step Studio 곡에 가사 타이밍을 적용하는 도구입니다.  
-오디오 편집기(멀티트랙 파형, 잡음 제거, 믹싱)도 함께 포함되어 있습니다.
+로컬 STT 서버(Whisper / Qwen3-ASR)로 오디오에서 **노래방 타이밍(.lrc)**을 생성하고, ACE-Step Studio 곡에 가사 타이밍을 적용하는 도구입니다.  
+오디오 편집기(멀티트랙 파형, 잡음 제거, 믹싱)와 시스템 모니터(CPU/GPU/RAM 사용량)도 함께 포함되어 있습니다.
 
 ---
 
 ## 주요 기능
 
 ### 1. AI 타이밍 생성 (메인 GUI)
-- **faster-whisper (stable-ts)**로 오디오에서 가사 + 타임스탬프 자동 추출
-- **원본 가사 정렬**: 사용자가 입력한 원본 가사를 기준으로 Whisper가 타이밍 생성 (가창 발음 오인식 방지)
+- **타이밍 엔진 2종**: `Qwen ForcedAligner`(기본, 원본 가사 정렬에 강함) / `stable-ts (Whisper)`
+- **전사 엔진 선택**: `Faster-Whisper` / `Qwen3-ASR` / `없음 (타이밍만)` — 원본 가사가 있으면 전사 없이 정렬만 가능
+- **원본 가사 정렬**: 사용자가 입력한 원본 가사를 기준으로 타이밍 생성 (가창 발음 오인식 방지)
+- **원본 가사 편집해도 타이밍 보존**: 왼쪽 가사를 수정해도 우측에 생성된 단어 태그(`<mm:ss.cc>`)와 줄 수가 그대로 유지됨
 - **섹션 태그 제외**: `[Intro]`, `[Verse 1]` 등 섹션 태그는 타이밍 생성 대상에서 자동 제외
 - **LRC 편집**: 미리보기 영역에서 타임스탬프/가사 직접 편집 (포커스 아웃 시 단어 태그 자동 이동)
 - **노래방 미리보기**: 재생 + 가사 오버레이 (현재 단어 하이라이트)
@@ -17,7 +19,7 @@
 - **재생 속도 조절**: 0.5x ~ 1.5x
 - **키보드 컨트롤**: Space(재생/정지), ←/→(±5초)
 - **LRC 비교**: 원본 vs 수정 LRC 비교 + unified diff
-- **ACE-Step Studio 적용**: DB + 파일 동시 저장, 백업 자동 생성
+- **ACE-Step Studio 적용**: Studio 실행 중에는 공식 가사편집 기능(MCP)으로 즉시 반영, 꺼져 있으면 DB + 파일 저장(백업 자동 생성)
 - **설정 저장**: 모델/연산/언어/색상/폰트 크기 자동 저장 (settings.json)
 - **FFmpeg 콘솔 경고 정리**: 오디오 재생 시 뜨는 하드웨어 인코더 탐색 경고를 콘솔에서 숨김
 
@@ -34,6 +36,7 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 - **핀포인트(빨간 세로선)**: 클릭 지점에 재생 시작 위치 표시 (두 트랙에 공통)
 - **플레이헤드(노란 세로선)**: 재생 위치 표시
 - **재생 슬라이더**: 시간 이동 및 재생/정지
+- **시간 표시**: `01:47.30 / 01:49.84` 형식 (LRC 편집창과 동일한 `mm:ss.cc`)
 - **두 트랙 동시 믹싱 재생**: 볼륨/M/S 반영된 믹스를 미리듣기 (자동 저장 안 함)
 - **M 버튼**: 현재 트랙 음소거
 - **S 버튼**: 다른 트랙 음소거 (이 트랙만 재생) — Audacity 의미와 동일
@@ -49,6 +52,7 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
   - `두 트랙 따로 저장`: 반주와 보컬을 각각 별도 파일로 저장
   - `믹스 미리보기 저장`: 믹싱된 결과만 저장 (미리듣기용)
 - **큰 파일 로드 최적화**: 오디오 파일 읽기를 백그라운드 스레드로 처리해 큰 파일을 열어도 UI가 멈추지 않음
+- **시스템 모니터**: CPU / RAM / GPU(VRAM·전력) 사용량을 실시간 그래프로 표시
 
 ### 3. 잡음 제거 (파일 스트리밍)
 메인 GUI의 **잡음 제거** 버튼 또는 오디오 편집기의 **파일 잡음 제거 (고급)** 버튼으로 실행합니다.
@@ -74,7 +78,7 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 
 ## 실행 방법
 
-1. `run_server.bat` 더블클릭 → STT 서버 시작 (포트 8000)
+1. `run_server.bat` 더블클릭 → STT 서버 시작 (포트 8001)
    - 또는 GUI의 "서버 시작" 버튼으로 서버를 직접 띄울 수 있습니다.
    - 서버가 꺼진 상태에서 "타이밍 생성"을 누르면 GUI가 자동으로 서버를 시작하고, 준비되면 타이밍 생성을 이어갑니다.
    - 서버는 이 컴퓨터에서만 접속할 수 있으며, 오디오 파일 업로드는 최대 2GiB입니다.
@@ -87,13 +91,13 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 1. **서버 상태 확인**: 상단 "상태 확인" 버튼
 2. **오디오 파일 선택**: "찾기" 버튼으로 .wav/.mp3/.flac/.m4a/.ogg 선택
 3. **언어 선택**: 드롭다운에서 ko/en/ja/zh 등 선택
-4. **모델 선택**: tiny/base/small/medium/large-v3 (기본: large-v3)
-5. **연산 타입**: int8 (빠름) / float16 (정확도↑) / float32
+4. **엔진 선택**: 전사 엔진(`없음 (타이밍만)` 권장) / 타이밍 엔진(`Qwen ForcedAligner` 기본)
+5. **모델·연산 타입**: 전사 엔진을 쓸 경우에만 필요 (Whisper tiny~large-v3, int8/float16/float32)
 6. **(선택) 원본 가사 입력**: 왼쪽 패널에 가사 입력 → Whisper가 이 가사를 기준으로 타이밍 생성
 7. **(선택) Ace Step 곡 ID 입력**: ACE-Step Studio 곡 ID (UUID) 또는 콤보박스에서 선택
 8. **타이밍 생성**: "타이밍 생성" 버튼 (생성 중에는 "취소"로 자동 전환)
 9. **편집**: 오른쪽 미리보기에서 타임스탬프/가사 직접 수정
-10. **Ace Step Studio에 적용**: 버튼 클릭 → DB + 파일 동시 저장 (백업 자동 생성)
+10. **Ace Step Studio에 적용**: 버튼 클릭 → Studio가 켜져 있으면 공식 가사편집 기능으로 즉시 반영 (재시작 불필요), 꺼져 있으면 DB + 파일 저장 (백업 자동 생성)
 
 ---
 
@@ -147,23 +151,29 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 
 ## 서버 설정
 
-환경변수로 모델/연산 변경 가능:
-- `MODEL_NAME`: whisper 모델 (기본 large-v3)
-- `COMPUTE_TYPE`: int8 / float16 / float32
-- `DEVICE`: cuda / cpu
+환경변수로 엔진·모델·연산을 변경할 수 있습니다.
 
-`run_server.bat`에서 설정:
+| 변수 | 설명 | 기본값 |
+|---|---|---|
+| `TRANSCRIPTION_ENGINE` | `none` / `whisper` / `qwen-asr` | `none` |
+| `TIMING_ENGINE` | `qwen-forced-aligner` / `stable-ts` | `qwen-forced-aligner` |
+| `MODEL_NAME` | 전사용 모델 (Qwen3-ASR 또는 Whisper) | `Qwen/Qwen3-ForcedAligner-0.6B` |
+| `FORCED_ALIGNER_MODEL` | Qwen 정렬 모델 | `Qwen/Qwen3-ForcedAligner-0.6B` |
+| `COMPUTE_TYPE` | int8 / float16 / float32 | `float16` |
+| `DEVICE` | cuda / cpu | `cuda` |
+
+`run_server.bat`에서 설정 (현재 `large-v3` / `int8`로 지정되어 있습니다):
 ```
 set MODEL_NAME=large-v3
-set COMPUTE_TYPE=float16
+set COMPUTE_TYPE=int8
 ```
 
 ---
 
-## Whisper 모델 위치
+## 모델 위치
 
-- `C:\Users\donian\.cache\huggingface\hub\models--Systran--faster-whisper-*`
-- 첫 실행 시 자동 다운로드
+- Qwen3-ASR / ForcedAligner / Whisper 모델은 프로그램 폴더의 **`models/`** 에 저장됩니다 (첫 실행 시 자동 다운로드).
+- `models/`는 수 GB 단위의 캐시이므로 **Git에 커밋하지 않습니다** (`.gitignore`에 등록됨).
 
 ---
 
@@ -232,13 +242,25 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 
 ## ACE-Step Studio 적용
 
-1. ACE-Step Studio 종료 (DB 잠금 방지)
-2. karaoke GUI에서 타이밍 생성
-3. song_id 입력 → "Ace Step Studio에 적용" 클릭
-4. "완료" 메시지 확인 (DB 갱신 + 백업 생성)
-5. ACE-Step Studio 재시작 → 가사 타이밍 반영
+### Studio가 실행 중일 때 (권장)
 
-### 백업 파일
+Studio v4.0.2 이상은 `http://127.0.0.1:8792/mcp`로 로컬 MCP 서버를 띄웁니다.
+이 앱은 Studio의 공식 가사편집 도구(`karaoke_set`, `library_song_update`)를 호출하므로
+**DB를 직접 덮어쓰지 않고, Studio를 종료하거나 재시작할 필요가 없습니다.**
+
+1. ACE-Step Studio를 켜둔 상태에서 타이밍 생성
+2. 곡 선택 → "Ace Step Studio에 적용" 클릭
+3. 확인 창에 "공식 가사편집 기능으로 적용합니다"가 표시되는지 확인
+4. 적용 즉시 Studio에 반영 (원본 가사도 입력되어 있으면 함께 저장됨)
+
+### Studio가 꺼져 있을 때 (기존 방식)
+
+1. ACE-Step Studio가 종료된 상태에서 적용
+2. `{song_id}.lrc` 파일과 `library.sqlite`를 직접 갱신
+3. "완료" 메시지 확인 (백업 자동 생성)
+4. ACE-Step Studio 재시작 → 가사 타이밍 반영
+
+### 백업 파일 (기존 방식에서만 생성)
 - `media/{song_id}.lrc.bak`
 - `data/library.sqlite.bak`
 
@@ -269,10 +291,20 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 
 ---
 
+## 테스트
+
+```bat
+.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+ACE-Step Studio MCP 호출(모킹), DB 폴백 경로, 원본 가사 편집 시 Enhanced LRC 보존을 검증합니다.
+
+---
+
 ## 삭제 방법
 
 - 폴더 삭제: `C:\Users\donian\Documents\기본 프로젝트\karaoke-timing-generator\`
-- Whisper 모델 캐시: `C:\Users\donian\.cache\huggingface\` (다른 프로그램이 쓸 수 있으니 주의)
+- 모델 캐시: 프로젝트 폴더의 `models\` (Git에는 포함되지 않음)
 - 설정 파일: `settings.json` (프로젝트 폴더 내)
 
 ---
@@ -291,21 +323,29 @@ karaoke-timing-generator/
 │   ├── subtitle_lane.py    # _SubtitleLane
 │   └── track_worker.py     # _LoadTrackWorker
 ├── audio_denoise.py        # 파일 스트리밍 잡음 제거 (afftdn / DeepFilterNet)
-├── stt_server.py           # FastAPI STT 서버 (faster-whisper)
+├── stt_server.py           # FastAPI STT 서버 (Qwen3-ASR / ForcedAligner / faster-whisper)
 ├── core/                   # 비즈니스 로직 모듈
 │   ├── __init__.py
 │   ├── transcribe_worker.py  # STT 전사 워커
 │   ├── lrc_parser.py         # LRC 파싱/빌딩 유틸리티
 │   ├── server_worker.py      # 서버 시작/상태 확인 워커
 │   ├── timing_offset.py      # 타이밍 오프셋 조정 유틸리티
-│   └── ace_step_integration.py  # ACE-Step Studio DB 연동
+│   ├── ace_step_mcp.py       # ACE-Step Studio 로컬 MCP 클라이언트 (공식 가사편집 도구 호출)
+│   ├── ace_step_integration.py  # ACE-Step Studio 연동 (MCP 우선, DB 폴백)
+│   └── system_monitor.py     # CPU/GPU/RAM 사용량 수집 워커
 ├── ui/                     # UI 위젯 모듈
 │   ├── __init__.py
 │   ├── design_tokens.py      # 디자인 토큰 + QSS 스타일시트
 │   ├── preview_section.py    # 재생 미리보기 섹션 위젯
 │   ├── settings_section.py   # 서버/설정 섹션 위젯
 │   ├── lyrics_section.py     # 가사/LRC 편집 섹션 위젯
-│   └── lrc_highlighter.py   # LRC 구문 강조기
+│   ├── help_dialog.py        # 도움말 다이얼로그
+│   ├── lrc_highlighter.py   # LRC 구문 강조기
+│   └── system_monitor_panel.py  # 시스템 모니터 패널
+├── tests/
+│   ├── test_ace_step_mcp.py   # MCP 연동 / DB 폴백 단위 테스트
+│   └── test_lrc_parser.py     # 원본 가사 편집 시 LRC 보존 테스트
+├── models/                  # 모델 캐시 (자동 생성, Git 제외)
 ├── fonts/
 │   └── Inter-Regular.ttf     # Inter 폰트
 ├── run_karaoke.bat         # GUI 실행
@@ -333,6 +373,7 @@ karaoke-timing-generator/
 | 잡음 제거 (파일) | FFmpeg (`afftdn`) | LGPL v2.1+ (LGPL 빌드) / GPL v3 (GPL 빌드) | 빌드에 따름 | **상업 배포에는 `--enable-gpl`·`--enable-nonfree`가 없는 LGPL 빌드를 사용해야 합니다.** 이 프로그램은 FFmpeg를 별도 프로세스로 호출하며 링크하지 않습니다. |
 | 잡음 제거 (음성, 선택) | DeepFilterNet | MIT / Apache 2.0 (듀얼) | 가능 | 선택 설치. 공식 저장소의 모델 가중치도 동일한 듀얼 라이선스로 안내됩니다. 외부 변환 모델은 별도 확인. |
 | STT 모델 | faster-whisper / stable-whisper | MIT License | 가능 | 다운로드하는 Whisper 모델 가중치는 OpenAI 등 별도 라이선스 적용 가능. 재배포 전 확인 필요. |
+| 타이밍/전사 모델 | Qwen3-ASR / Qwen3-ForcedAligner (`qwen_asr`) | 각 모델 가중치의 라이선스 확인 필요 | 확인 필요 | 기본 타이밍 엔진. 다운로드한 모델 가중치의 라이선스를 재배포 전 반드시 확인. |
 | STT 서버 | FastAPI | MIT License | 가능 | 저작권 표시 유지. |
 | ASGI 서버 | Uvicorn | BSD-3-Clause License | 가능 | 저작권 표시 유지. |
 | HTTP 클라이언트 | Requests | Apache License 2.0 | 가능 | 특허 관련 조항과 저작권 표시 유지. |

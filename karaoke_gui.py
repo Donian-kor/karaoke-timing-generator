@@ -18,15 +18,18 @@ from core.transcribe_worker import SERVER_URL, TranscribeWorker
 from core.server_worker import ServerStartWorker, HealthCheckWorker
 from core.lrc_parser import (
     fmt_ts, build_standard_lrc, build_enhanced_lrc,
-    lrc_to_plain_text, parse_lrc_words,
+    lrc_to_plain_text, parse_lrc_words, sync_plain_lrc_text,
 )
 from core.timing_offset import shift_ts, detect_audio_onset, get_first_word_timestamp
 from core.ace_step_integration import load_ace_songs, get_lrc_for_song, apply_lrc_to_ace
+from core.ace_step_mcp import is_studio_available
+from core.system_monitor import SystemMonitorWorker
 from ui.preview_section import PreviewSection
 from ui.settings_section import SettingsSection
 from ui.lyrics_section import LyricsSection
 from ui.lrc_highlighter import LrcHighlighter
 from ui.help_dialog import HelpDialog
+from ui.system_monitor_panel import SystemMonitorPanel
 
 
 def _quiet_ffmpeg_noise():
@@ -81,12 +84,22 @@ class MainWindow(QWidget):
         self._last_standard = ""
         self._last_enhanced = ""
         self._pending_preview_path = None
+        self._gen_timer = None
+        self._gen_start_time = None
         self._settings = self._load_settings()
         self._preview_parsed = []
         self._slider_dragging = False
         self._is_syncing = False
+        self._lyrics_syncing = False
+        self._loading_song = False
         self._last_highlight_block = None
         self._lrc_before_edit = ""
+        # LRC 미리보기 되돌리기/다시 실행 히스토리
+        self._preview_undo_stack = []
+        self._preview_redo_stack = []
+        self._preview_last_text = ""
+        self._preview_history_updating = False
+        self._preview_history_timer = None
         self._color_state = self._settings.get("colors", {"current": "#fbbf24", "past": "#6b7280", "future": "#ffffff"})
         self._font_sizes = self._settings.get("font_sizes", {"lyrics": 13, "preview": 13})
         self._build_ui()
@@ -107,6 +120,8 @@ class MainWindow(QWidget):
     def _save_settings(self):
         try:
             data = {
+                "transcription_engine": self.engine_combo.currentText(),
+                "timing_engine": self.timing_combo.currentText(),
                 "model": self.model_combo.currentText(),
                 "compute_type": self.compute_combo.currentText().split()[0],
                 "language": self.lang_combo.currentData(),
@@ -131,27 +146,91 @@ class MainWindow(QWidget):
         "large-v3": {"int8": 6, "float16": 10, "float32": 20},
     }
 
+    def _update_model_combo(self):
+        engine = self.engine_combo.currentText()
+        timing = self.timing_combo.currentText()
+        prev_model = self.model_combo.currentText()
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        if engine == "Faster-Whisper":
+            items = ["tiny", "base", "small", "medium", "large-v3"]
+            self.model_combo.addItems(items)
+            if prev_model in items:
+                self.model_combo.setCurrentText(prev_model)
+            else:
+                self.model_combo.setCurrentText("large-v3")
+            self.model_combo.setEnabled(True)
+        elif engine.startswith("없음"):
+            # 타이밍 엔진이 stable-ts면 Whisper 모델이 필요하다.
+            if timing.startswith("stable"):
+                items = ["tiny", "base", "small", "medium", "large-v3"]
+                self.model_combo.addItems(items)
+                if prev_model in items:
+                    self.model_combo.setCurrentText(prev_model)
+                else:
+                    self.model_combo.setCurrentText("base")
+                self.model_combo.setEnabled(True)
+            else:
+                # Qwen ForcedAligner는 고정 모델을 사용한다.
+                self.model_combo.addItem("Qwen/Qwen3-ForcedAligner-0.6B")
+                self.model_combo.setCurrentText("Qwen/Qwen3-ForcedAligner-0.6B")
+                self.model_combo.setEnabled(False)
+        else:
+            items = ["Qwen/Qwen3-ASR-1.7B", "Qwen/Qwen3-ASR-0.6B"]
+            self.model_combo.addItems(items)
+            if prev_model in items:
+                self.model_combo.setCurrentText(prev_model)
+            else:
+                self.model_combo.setCurrentText("Qwen/Qwen3-ASR-1.7B")
+            self.model_combo.setEnabled(True)
+        self.model_combo.blockSignals(False)
+        self._update_compute_combo()
+
     def _update_compute_combo(self):
         model = self.model_combo.currentText()
-        vram = self._VRAM.get(model, self._VRAM["large-v3"])
-        prev = self.compute_combo.currentText().split()[0] if self.compute_combo.currentText() else "int8"
+        engine = self.engine_combo.currentText()
+        timing = self.timing_combo.currentText()
+        prev = self.compute_combo.currentText().split()[0] if self.compute_combo.currentText() else "float16"
         self.compute_combo.blockSignals(True)
         self.compute_combo.clear()
-        for ct in ["int8", "float16", "float32"]:
-            self.compute_combo.addItem(f"{ct} (VRAM ~{vram[ct]}GB)")
+        if timing.startswith("stable") or engine == "Faster-Whisper":
+            vram = self._VRAM.get(model, self._VRAM["large-v3"])
+            for ct in ["int8", "float16", "float32"]:
+                self.compute_combo.addItem(f"{ct} (VRAM ~{vram[ct]}GB)")
+        else:
+            for ct in ["float16", "float32", "bfloat16"]:
+                self.compute_combo.addItem(ct)
         for i in range(self.compute_combo.count()):
             if self.compute_combo.itemText(i).startswith(prev):
                 self.compute_combo.setCurrentIndex(i)
                 break
-        # 글자가 잘리지 않도록 가장 긴 항목에 맞춰 폭을 맞춘다.
+        if self.compute_combo.currentIndex() < 0 and self.compute_combo.count():
+            self.compute_combo.setCurrentIndex(0)
         fm = self.compute_combo.fontMetrics()
         need = max(fm.horizontalAdvance(self.compute_combo.itemText(i))
                    for i in range(self.compute_combo.count()))
         self.compute_combo.setFixedWidth(need + 44)
         self.compute_combo.blockSignals(False)
 
+    @staticmethod
+    def _engine_key(label):
+        if label.startswith("Faster"):
+            return "faster-whisper"
+        if label.startswith("없음"):
+            return "none"
+        return "qwen-asr"
+
+    @staticmethod
+    def _timing_key(label):
+        return "stable-ts" if label.startswith("stable") else "qwen-forced-aligner"
+
     def _apply_settings_to_ui(self):
         try:
+            if "transcription_engine" in self._settings:
+                self.engine_combo.setCurrentText(self._settings["transcription_engine"])
+            if "timing_engine" in self._settings:
+                self.timing_combo.setCurrentText(self._settings["timing_engine"])
+            self._update_model_combo()
             if "model" in self._settings:
                 self.model_combo.setCurrentText(self._settings["model"])
             self._update_compute_combo()
@@ -173,7 +252,7 @@ class MainWindow(QWidget):
             # 가사/LRC 입력창 복원
             lyrics_text = self._settings.get("lyrics_text")
             if isinstance(lyrics_text, str) and lyrics_text.strip():
-                self.preview.setPlainText(lyrics_text)
+                self._preview_set_text(lyrics_text)
             window_size = self._settings.get("window_size")
             if isinstance(window_size, list) and len(window_size) == 2:
                 self.resize(*window_size)
@@ -193,37 +272,43 @@ class MainWindow(QWidget):
         self.menu_bar = menubar
 
         file_menu = menubar.addMenu("파일(&F)")
-        file_menu.addAction("보컬 열기", self.browse_audio)
-        file_menu.addAction(
+        act_open = file_menu.addAction("보컬 열기", self.browse_audio)
+        act_open.setShortcut("Ctrl+O")
+        act_open2 = file_menu.addAction(
             "반주 열기", lambda: self.audio_editor_panel.open_track(2)
         )
+        act_open2.setShortcut("Ctrl+Shift+O")
         file_menu.addSeparator()
-        file_menu.addAction("보컬 저장", self._panel_action("save_track", 1))
-        file_menu.addAction("반주 저장", self._panel_action("save_track", 2))
-        file_menu.addAction(
+        act_save1 = file_menu.addAction("보컬 저장", self._panel_action("save_track", 1))
+        act_save1.setShortcut("Ctrl+S")
+        act_save2 = file_menu.addAction("반주 저장", self._panel_action("save_track", 2))
+        act_save2.setShortcut("Ctrl+Shift+S")
+        act_save_both = file_menu.addAction(
             "분리 저장", self._panel_action("save_both_tracks")
         )
-        file_menu.addAction("믹스 저장", self._panel_action("save_result"))
+        act_save_both.setShortcut("Ctrl+Alt+S")
+        act_save_res = file_menu.addAction("믹스 저장", self._panel_action("save_result"))
+        act_save_res.setShortcut("Ctrl+M")
         file_menu.addSeparator()
-        file_menu.addAction("LRC 불러오기", self._panel_action("load_lrc"))
-        file_menu.addAction("LRC 저장", self._panel_action("save_lrc"))
+        act_load_lrc = file_menu.addAction("LRC 불러오기", self._panel_action("load_lrc"))
+        act_load_lrc.setShortcut("Ctrl+L")
+        act_save_lrc = file_menu.addAction("LRC 저장", self._panel_action("save_lrc"))
+        act_save_lrc.setShortcut("Ctrl+Shift+L")
         file_menu.addSeparator()
-        file_menu.addAction("종료", self.close)
+        act_exit = file_menu.addAction("종료", self.close)
+        act_exit.setShortcut("Ctrl+Q")
 
         edit_menu = menubar.addMenu("편집(&E)")
-        edit_menu.addAction(
-            "복사", self._panel_action("copy_selection")
-        )
-        edit_menu.addAction(
-            "붙여넣기", self._panel_action("paste_clipboard")
-        )
-        edit_menu.addAction(
-            "잘라내기", self._panel_action("trim_delete")
-        )
-        edit_menu.addAction(
-            "선택 구간 음소거", self._panel_action("delete_selection_silence")
-        )
-        edit_menu.addAction("되돌리기", self._panel_action("undo"))
+        act_copy = edit_menu.addAction("복사", self._panel_action("copy_selection"))
+        act_copy.setShortcut("Ctrl+C")
+        act_paste = edit_menu.addAction("붙여넣기", self._panel_action("paste_clipboard"))
+        act_paste.setShortcut("Ctrl+V")
+        act_cut = edit_menu.addAction("잘라내기", self._panel_action("trim_delete"))
+        act_cut.setShortcut("Ctrl+X")
+        act_mute = edit_menu.addAction("선택 구간 음소거", self._panel_action("delete_selection_silence"))
+        act_mute.setShortcut("Del")
+        act_undo = edit_menu.addAction("되돌리기", self._panel_action("undo"))
+        act_undo.setShortcut("Ctrl+Z")
 
         view_menu = menubar.addMenu("보기(&V)")
         self.action_link_tracks = view_menu.addAction("두 트랙 함께 선택")
@@ -232,27 +317,13 @@ class MainWindow(QWidget):
         self.action_waveform_visible.setCheckable(True)
 
         tools_menu = menubar.addMenu("도구(&T)")
-        tools_menu.addAction(
-            "선택 구간만 남기기", self._panel_action("trim_keep")
-        )
-        tools_menu.addAction(
-            "선택 구간 내보내기", self._panel_action("trim_export_selected")
-        )
-        tools_menu.addAction(
-            "정규화", self._panel_action("normalize_track")
-        )
-        tools_menu.addAction(
-            "페이드 인/아웃", self._panel_action("fade_in_out")
-        )
-        tools_menu.addAction(
-            "선택 구간 반복 재생", self._panel_action("loop_play")
-        )
-        tools_menu.addAction(
-            "믹싱 미리보기", self._panel_action("mix_tracks")
-        )
-        tools_menu.addAction(
-            "파일 잡음 제거", self._panel_action("open_denoise_dialog")
-        )
+        tools_menu.addAction("선택 구간만 남기기", self._panel_action("trim_keep"))
+        tools_menu.addAction("선택 구간 내보내기", self._panel_action("trim_export_selected"))
+        tools_menu.addAction("정규화", self._panel_action("normalize_track"))
+        tools_menu.addAction("페이드 인/아웃", self._panel_action("fade_in_out"))
+        tools_menu.addAction("선택 구간 반복 재생", self._panel_action("loop_play"))
+        tools_menu.addAction("믹싱 미리보기", self._panel_action("mix_tracks"))
+        tools_menu.addAction("파일 잡음 제거", self._panel_action("open_denoise_dialog"))
 
         help_menu = menubar.addMenu("도움말(&H)")
         act_help = help_menu.addAction("사용 방법")
@@ -278,7 +349,8 @@ class MainWindow(QWidget):
         self.lang_combo = self.settings_section.lang_combo
         self.model_combo = self.settings_section.model_combo
         self.compute_combo = self.settings_section.compute_combo
-        self.progress = self.settings_section.progress
+        self.engine_combo = self.settings_section.engine_combo
+        self.timing_combo = self.settings_section.timing_combo
 
         # SettingsSection 시그널 연결
         self.settings_section.server_toggle_clicked.connect(self._on_server_toggle)
@@ -289,10 +361,15 @@ class MainWindow(QWidget):
         self.model_combo.currentTextChanged.connect(lambda _: self._save_settings())
         self.compute_combo.currentTextChanged.connect(lambda _: self._save_settings())
         self.model_combo.currentTextChanged.connect(lambda _: self._update_compute_combo())
-
+        self.engine_combo.currentTextChanged.connect(lambda _: self._update_model_combo())
+        self.engine_combo.currentTextChanged.connect(lambda _: self._save_settings())
+        self.timing_combo.currentTextChanged.connect(lambda _: self._update_model_combo())
+        self.timing_combo.currentTextChanged.connect(lambda _: self._save_settings())
 
         # 가사 / LRC 섹션 (LyricsSection 위젯)
         self.lyrics_section = LyricsSection()
+        self.progress = self.lyrics_section.progress
+        self.elapsed_label = self.lyrics_section.elapsed_label
         self.song_combo = self.lyrics_section.song_combo
         self.lyrics_section.song_selected.connect(self._on_song_selected)
         self.lyrics_section.song_refresh_clicked.connect(self._load_ace_songs)
@@ -300,7 +377,13 @@ class MainWindow(QWidget):
         self.lyrics_edit = self.lyrics_section.lyrics_edit
         self.preview = self.lyrics_section.preview
         self.preview.textChanged.connect(self._refresh_preview_parsed)
+        self.lyrics_edit = self.lyrics_section.lyrics_edit
+        self.lyrics_edit.textChanged.connect(self._sync_lrc_from_lyrics)
+        # LRC 미리보기 되돌리기/다시 실행 단축키
+        QShortcut(QKeySequence.Undo, self.preview).activated.connect(self.undo_preview)
+        QShortcut(QKeySequence.Redo, self.preview).activated.connect(self.redo_preview)
         self.preview.viewport().installEventFilter(self)
+        self.preview.installEventFilter(self)
         self.btn_apply = self.lyrics_section.btn_apply
         self.btn_compare = self.lyrics_section.btn_compare
         self.btn_revert = self.lyrics_section.btn_revert
@@ -317,6 +400,8 @@ class MainWindow(QWidget):
         self.lyrics_section.apply_clicked.connect(self.apply_to_ace)
         self.lyrics_section.compare_clicked.connect(self.compare_lrc)
         self.lyrics_section.revert_clicked.connect(self.revert_lrc)
+        self.lyrics_section.undo_clicked.connect(self.undo_preview)
+        self.lyrics_section.redo_clicked.connect(self.redo_preview)
         self.lyrics_section.auto_offset_clicked.connect(self.apply_auto_offset)
         self.lyrics_section.line_offset_clicked.connect(self.apply_line_offset)
         self.lyrics_section.offset_clicked.connect(self.apply_offset)
@@ -439,7 +524,7 @@ class MainWindow(QWidget):
 
         self.side_menu = QFrame()
         self.side_menu.setObjectName("sideMenu")
-        self.side_menu.setFixedWidth(136)
+        self.side_menu.setFixedWidth(200)
         self.side_menu.setStyleSheet("QFrame { background-color: #EEF2F7; border: none; border-right: 1px solid #BDBDBD; }")
         side_layout = QVBoxLayout(self.side_menu)
         side_layout.setContentsMargins(0, 0, 0, 0)
@@ -465,6 +550,15 @@ class MainWindow(QWidget):
             self.side_buttons.append(btn)
         side_layout.addStretch(1)
 
+        # 사이드바 하단 시스템 사용량(CPU/RAM/GPU/VRAM/전력) 패널
+        side_footer = QWidget()
+        footer_layout = QVBoxLayout(side_footer)
+        footer_layout.setContentsMargins(8, 8, 8, 8)
+        footer_layout.setSpacing(0)
+        self.system_panel = SystemMonitorPanel()
+        footer_layout.addWidget(self.system_panel)
+        side_layout.addWidget(side_footer)
+
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
@@ -484,6 +578,11 @@ class MainWindow(QWidget):
         self._on_waveform_visibility_changed(
             self.chk_waveform_visible.isChecked()
         )
+
+        # 시스템 사용량 모니터는 UI를 막지 않도록 별도 스레드에서 수집한다.
+        self._system_monitor = SystemMonitorWorker(self)
+        self._system_monitor.sample_ready.connect(self.system_panel.update_sample)
+        self._system_monitor.start()
 
         self._update_compute_combo()
         self.status_label = QLabel("")
@@ -508,7 +607,7 @@ class MainWindow(QWidget):
         workspace_height, lyrics_height = (504, 336) if visible else (130, 710)
         self.vsplitter.setSizes([workspace_height, lyrics_height])
 
-    def _on_health_checked(self, ok, model, compute_type):
+    def _on_health_checked(self, ok, model, compute_type, transcription_engine="", timing_engine=""):
         if ok:
             self.server_status.setText(f"서버 상태: 실행 중 ({model}, {compute_type})")
         else:
@@ -537,13 +636,17 @@ class MainWindow(QWidget):
 
     def _on_song_selected(self, idx):
         # 곡을 고르면 저장된 원본 가사와 이미 생성된 LRC를 함께 불러온다.
+        self._loading_song = True
         if not hasattr(self, "lyrics_edit"):
+            self._loading_song = False
             return
         song_id = self.song_combo.currentData()
         if not song_id:
+            self._loading_song = False
             return
         db_path = os.path.join(ACE_DATA_DIR, "library.sqlite")
         if not os.path.exists(db_path):
+            self._loading_song = False
             return
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
@@ -552,8 +655,10 @@ class MainWindow(QWidget):
             ).fetchone()
             conn.close()
         except Exception:
+            self._loading_song = False
             return
         if row is None:
+            self._loading_song = False
             return
 
         lyrics, meta_json = row
@@ -571,7 +676,7 @@ class MainWindow(QWidget):
         self._last_standard = lrc
         self._lrc_before_edit = lrc
         if lrc:
-            self.preview.setPlainText(lrc)
+            self._preview_set_text(lrc)
         else:
             self.preview.clear()
 
@@ -595,6 +700,7 @@ class MainWindow(QWidget):
                 self.status_label.setText(f"기존 LRC를 불러왔습니다: {title}")
             else:
                 self.status_label.setText("이 곡에는 저장된 가사/LRC가 없습니다. 직접 입력하세요.")
+        self._loading_song = False
 
     def browse_audio(self):
         path, _ = QFileDialog.getOpenFileName(self, "오디오 파일 선택", "", "Audio Files (*.wav *.mp3 *.flac *.m4a *.ogg);;All Files (*)")
@@ -649,7 +755,7 @@ class MainWindow(QWidget):
         # 이미 실행 중인 서버는 이 앱이 소유한 프로세스인지 확인할 수 없으므로 종료하지 않는다.
         if self.check_health():
             self.status_label.setText(
-                "포트 8000에서 서버가 이미 실행 중입니다. 기존 서버를 종료하지 않았습니다."
+                "포트 8001에서 서버가 이미 실행 중입니다. 기존 서버를 종료하지 않았습니다."
             )
             self._update_server_btn()
             if self._pending_generate:
@@ -666,6 +772,8 @@ class MainWindow(QWidget):
         self._start_worker = ServerStartWorker(
             sys.executable, script_dir,
             self.model_combo.currentText(), self.compute_combo.currentText().split()[0],
+            self._engine_key(self.engine_combo.currentText()),
+            self._timing_key(self.timing_combo.currentText()),
         )
         self._start_worker.finished.connect(self._on_server_started)
         self._start_worker.start()
@@ -686,6 +794,7 @@ class MainWindow(QWidget):
             self._pending_generate = False
             self.server_proc = None
             if pending_generate:
+                self._stop_gen_timer()
                 self.progress.setVisible(False)
                 self.lyrics_section.set_generating(False)
             if msg:
@@ -728,7 +837,7 @@ class MainWindow(QWidget):
         server_running = self.check_health()
         if server_running:
             self.status_label.setText(
-                "포트 8000의 서버가 계속 응답 중입니다. 이 앱에서 시작하지 않은 서버는 종료하지 않았습니다."
+                "포트 8001의 서버가 계속 응답 중입니다. 이 앱에서 시작하지 않은 서버는 종료하지 않았습니다."
             )
         else:
             self.status_label.setText("서버가 중지되었습니다.")
@@ -758,6 +867,10 @@ class MainWindow(QWidget):
         # GUI에서 선택한 모델이 서버에 떠 있는 모델과 다르면 서버를 (재)시작
         selected_model = self.model_combo.currentText()
         selected_compute = self.compute_combo.currentText().split()[0]
+        selected_engine = self._engine_key(self.engine_combo.currentText())
+        selected_timing = self._timing_key(self.timing_combo.currentText())
+
+        self._start_gen_timer()
 
         # 이미 서버를 시작하는 중이면, 준비가 끝난 뒤 자동으로 생성을 이어간다.
         if getattr(self, "_start_worker", None) is not None and self._start_worker.isRunning():
@@ -779,7 +892,9 @@ class MainWindow(QWidget):
             self.start_server()
             return
 
-        if info.get("model") != selected_model or info.get("compute_type") != selected_compute:
+        if (info.get("model") != selected_model or info.get("compute_type") != selected_compute
+                or info.get("transcription_engine") != selected_engine
+                or info.get("timing_engine") != selected_timing):
             if self.server_proc is None or self.server_proc.poll() is not None:
                 QMessageBox.warning(
                     self, "설정 불일치",
@@ -807,7 +922,12 @@ class MainWindow(QWidget):
             lyrics_for_gen = self.lyrics_edit.toPlainText().strip()
         if not lyrics_for_gen:
             lyrics_for_gen = self.lyrics_edit.toPlainText().strip()
-        self.worker = TranscribeWorker(audio_path, self.lang_combo.currentData(), lyrics_for_gen)
+        self.worker = TranscribeWorker(
+            audio_path,
+            self.lang_combo.currentData(),
+            lyrics_for_gen,
+            refine_timing=self.lyrics_section.is_refine_timing_enabled(),
+        )
         self.worker.progress.connect(lambda m: self.status_label.setText(m))
         self.worker.finished.connect(self.on_finished)
         self.worker.failed.connect(self.on_failed)
@@ -819,6 +939,7 @@ class MainWindow(QWidget):
             self.cancel_generation()
         elif self._pending_generate:
             self._pending_generate = False
+            self._stop_gen_timer()
             self.progress.setVisible(False)
             self.lyrics_section.set_generating(False)
             self.status_label.setText("생성 취소됨")
@@ -826,6 +947,7 @@ class MainWindow(QWidget):
             self.generate()
 
     def cancel_generation(self):
+        self._stop_gen_timer()
         if self.worker is not None and self.worker.isRunning():
             try:
                 self.worker.terminate()
@@ -840,14 +962,36 @@ class MainWindow(QWidget):
         self.lyrics_section.set_generating(False)
         self.status_label.setText("생성 취소됨")
 
+    def _start_gen_timer(self):
+        self._gen_start_time = time.monotonic()
+        if self._gen_timer is None:
+            self._gen_timer = QTimer(self)
+            self._gen_timer.timeout.connect(self._update_elapsed_label)
+        self.elapsed_label.setText("00분00초")
+        self._gen_timer.start(1000)
+        self._update_elapsed_label()
+
+    def _stop_gen_timer(self):
+        if self._gen_timer is not None:
+            self._gen_timer.stop()
+        self._gen_start_time = None
+
+    def _update_elapsed_label(self):
+        if self._gen_start_time is None:
+            return
+        elapsed = int(time.monotonic() - self._gen_start_time)
+        m, s = divmod(elapsed, 60)
+        self.elapsed_label.setText(f"{m:02d}분{s:02d}초")
+
     def on_finished(self, result):
+        self._stop_gen_timer()
         self.progress.setVisible(False)
         self.lyrics_section.set_generating(False)
         self.result = result
         std = build_standard_lrc(result.get("segments", []))
         enh = build_enhanced_lrc(result.get("segments", []))
         # ACE-Step Studio는 metadata_json의 "lrc" 필드(Enhanced LRC)를 사용합니다.
-        self.preview.setPlainText(enh)
+        self._preview_set_text(enh)
         self._last_standard = std
         self._last_enhanced = enh
         seg_count = len(result.get("segments", []))
@@ -855,6 +999,7 @@ class MainWindow(QWidget):
         self.status_label.setText(f"생성 완료: {seg_count}개 세그먼트, {word_count}개 단어")
 
     def on_failed(self, msg):
+        self._stop_gen_timer()
         self.progress.setVisible(False)
         self.lyrics_section.set_generating(False)
         self.status_label.setText("생성 실패")
@@ -951,11 +1096,14 @@ class MainWindow(QWidget):
         dlg.exec()
 
     def revert_lrc(self):
+        if not self._preview_history_updating:
+            self._preview_undo_stack.append(self.preview.toPlainText())
+            self._preview_redo_stack.clear()
         if self._last_enhanced and self.result is not None:
-            self.preview.setPlainText(self._last_enhanced)
+            self._preview_set_text(self._last_enhanced)
             self.status_label.setText("원본 생성 결과로 복원했습니다.")
         elif self._last_standard:
-            self.preview.setPlainText(self._last_standard)
+            self._preview_set_text(self._last_standard)
             self.status_label.setText("원본 생성 결과로 복원했습니다.")
         else:
             QMessageBox.information(self, "정보", "복원할 생성 결과가 없습니다.")
@@ -1053,25 +1201,47 @@ class MainWindow(QWidget):
         was_syncing = self._is_syncing
         self._is_syncing = True
         try:
-            self.preview.setPlainText(text)
+            self._preview_set_text(text)
         finally:
             self._is_syncing = was_syncing
         self.preview.verticalScrollBar().setValue(scroll)
 
     def _refresh_preview_parsed(self):
         """LRC 편집 내용이 변경되면 재생 파싱 결과를 갱신한다."""
+        if not self._is_syncing and not self._preview_history_updating:
+            if self._preview_history_timer is None:
+                self._preview_history_timer = QTimer(self)
+                self._preview_history_timer.setSingleShot(True)
+                self._preview_history_timer.timeout.connect(self._commit_preview_history)
+            self._preview_history_timer.start(800)
         try:
             self._preview_parsed = parse_lrc_words(self.preview.toPlainText())
-            # LRC에서 추출한 가사를 lyrics_edit에 동기화 (타이밍 생성 시 사용)
-            lrc_text = self.preview.toPlainText().strip()
-            if lrc_text:
-                plain = lrc_to_plain_text(lrc_text)
-                if plain and plain != self.lyrics_edit.toPlainText().strip():
-                    self.lyrics_edit.setPlainText(plain)
         except Exception:
             pass
         if not self._is_syncing and hasattr(self, "audio_editor_panel"):
             self.audio_editor_panel.set_lrc_text(self.preview.toPlainText())
+
+    def _sync_lrc_from_lyrics(self):
+        """원본 가사 편집 시 단순 LRC의 가사만 안전하게 갱신한다.
+
+        Enhanced LRC(단어 태그 포함)는 생성된 타이밍 결과이므로 절대 덮어쓰지 않는다.
+        """
+        if self._lyrics_syncing or self._is_syncing or self._loading_song:
+            return
+        self._lyrics_syncing = True
+        try:
+            new_lyrics = [
+                line.strip() for line in self.lyrics_edit.toPlainText().splitlines()
+                if line.strip()
+            ]
+            current = self.preview.toPlainText()
+            updated = sync_plain_lrc_text(current, new_lyrics)
+            if updated != current:
+                self._preview_set_text(updated)
+        except Exception:
+            pass
+        finally:
+            self._lyrics_syncing = False
 
     def _update_preview_lyric(self, position_sec=None, total_sec=None):
         if position_sec is None:
@@ -1135,7 +1305,7 @@ class MainWindow(QWidget):
         cursor = QTextCursor(block)
         cursor.select(QTextCursor.BlockUnderCursor)
         fmt = QTextCharFormat()
-        fmt.setBackground(QColor(self._color_state.get("current", "#fbbf24")))
+        fmt.setBackground(QColor(self._color_state.get("current", "#fbbf24")).lighter(180))
         cursor.mergeCharFormat(fmt)
         self._last_highlight_block = block
         # 재생 중일 때만 커서 이동 및 자동 스크롤 (일시정지/정지 시 사용자 선택 유지)
@@ -1238,12 +1408,15 @@ class MainWindow(QWidget):
         if ms == 0:
             QMessageBox.information(self, "정보", "오프셋이 0ms입니다.")
             return
+        if not self._preview_history_updating:
+            self._preview_undo_stack.append(self.preview.toPlainText())
+            self._preview_redo_stack.clear()
         txt = self.preview.toPlainText()
         if not txt.strip():
             QMessageBox.warning(self, "경고", "편집할 LRC 내용이 없습니다.")
             return
         new_txt = shift_ts(txt, ms)
-        self.preview.setPlainText(new_txt)
+        self._preview_set_text(new_txt)
         self._last_enhanced = new_txt
         self._last_standard = new_txt
         self.offset_spin.setValue(0)
@@ -1255,6 +1428,9 @@ class MainWindow(QWidget):
         if ms == 0:
             QMessageBox.information(self, "정보", "조정할 시간이 0ms입니다.")
             return
+        if not self._preview_history_updating:
+            self._preview_undo_stack.append(self.preview.toPlainText())
+            self._preview_redo_stack.clear()
         txt = self.preview.toPlainText()
         if not txt.strip():
             QMessageBox.warning(self, "경고", "편집할 LRC 내용이 없습니다.")
@@ -1285,7 +1461,7 @@ class MainWindow(QWidget):
             else:
                 new_lines.append(line)
         new_txt = "".join(new_lines)
-        self.preview.setPlainText(new_txt)
+        self._preview_set_text(new_txt)
         self._last_enhanced = new_txt
         self._last_standard = new_txt
         self.line_offset_spin.setValue(0)
@@ -1344,6 +1520,38 @@ class MainWindow(QWidget):
                     return True
         return super().eventFilter(obj, event)
 
+    def _preview_set_text(self, text):
+        self._preview_history_updating = True
+        try:
+            cursor = self.preview.textCursor()
+            cursor.beginEditBlock()
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(text)
+            cursor.endEditBlock()
+        finally:
+            self._preview_history_updating = False
+        self._preview_last_text = text
+
+    def _commit_preview_history(self):
+        if self._preview_history_updating or self._is_syncing:
+            return
+        current = self.preview.toPlainText()
+        if not self._preview_undo_stack and not self._preview_last_text:
+            self._preview_last_text = current
+            return
+        if current != self._preview_last_text:
+            self._preview_undo_stack.append(self._preview_last_text)
+            self._preview_redo_stack.clear()
+            self._preview_last_text = current
+
+    def undo_preview(self):
+        self.preview.undo()
+        self.status_label.setText("되돌리기 완료")
+
+    def redo_preview(self):
+        self.preview.redo()
+        self.status_label.setText("다시 실행 완료")
+
     def _normalize_lrc_line_timing(self):
         import re
         original_text = getattr(self, "_lrc_before_edit", "")
@@ -1351,6 +1559,9 @@ class MainWindow(QWidget):
         if original_text == edited_text or not edited_text.strip():
             self._lrc_before_edit = edited_text
             return
+        if not self._preview_history_updating:
+            self._preview_undo_stack.append(original_text)
+            self._preview_redo_stack.clear()
         old_lines = original_text.splitlines()
         new_lines = edited_text.splitlines()
         line_pattern = re.compile(r"^\s*\[(\d+):(\d+)\.(\d+)\](.*)$")
@@ -1379,6 +1590,7 @@ class MainWindow(QWidget):
                     )
 
         result_lines = list(new_lines)
+        changed_pivots = []
         for index, new_match in new_entries:
             old_match = matched_old.get(index)
             if old_match is None:
@@ -1395,6 +1607,7 @@ class MainWindow(QWidget):
 
             delta_ms = to_ms(new_match) - to_ms(old_match)
             if delta_ms:
+                changed_pivots.append((index, delta_ms))
                 result_lines[index] = re.sub(
                     r"<(\d+):(\d+)\.(\d+)>",
                     lambda match: shift_ts(
@@ -1404,9 +1617,22 @@ class MainWindow(QWidget):
                     ),
                     result_lines[index],
                 )
+
+        # 특정 [시간] 블록 하나가 이동한 경우, 그 뒤의 블록들도 함께 이동(ripple)
+        if len(changed_pivots) == 1:
+            pivot_index, delta_ms = changed_pivots[0]
+            pivot_pos = next(
+                (p for p, (li, _) in enumerate(new_entries) if li == pivot_index), None
+            )
+            if pivot_pos is not None:
+                for pos in range(pivot_pos + 1, len(new_entries)):
+                    target_line = new_entries[pos][0]
+                    result_lines[target_line] = shift_ts(
+                        result_lines[target_line], delta_ms
+                    )
         new_text = "\n".join(result_lines)
         if new_text != edited_text:
-            self.preview.setPlainText(new_text)
+            self._preview_set_text(new_text)
         self._lrc_before_edit = self.preview.toPlainText()
         # 수동 편집 결과도 적용 대상으로 유지
         self._last_enhanced = self.preview.toPlainText()
@@ -1452,7 +1678,6 @@ class MainWindow(QWidget):
 
 
     def apply_to_ace(self):
-        # ACE-Step Studio는 metadata_json의 "lrc" 필드(Enhanced LRC)를 사용합니다.
         # 미리보기(편집 결과)를 우선 사용하고, 없으면 생성된 LRC를 사용합니다.
         lrc = self.preview.toPlainText().strip() or self._last_enhanced or self._current_lrc()
         if not lrc:
@@ -1462,13 +1687,25 @@ class MainWindow(QWidget):
         if not song_id:
             QMessageBox.warning(self, "경고", "ACE-Step 곡을 선택하세요. (목록 새로고침)")
             return
-        if not os.path.isdir(ACE_MEDIA_DIR):
-            QMessageBox.critical(self, "오류", f"Ace Step Studio 데이터 폴더를 찾을 수 없습니다:\n{ACE_MEDIA_DIR}")
-            return
-        target = os.path.join(ACE_MEDIA_DIR, f"{song_id}.lrc")
+
+        use_mcp = is_studio_available()
+        if use_mcp:
+            detail = (
+                "ACE-Step Studio의 공식 가사편집 기능으로 적용합니다.\n"
+                "Studio를 종료하거나 재시작할 필요가 없습니다."
+            )
+        else:
+            if not os.path.isdir(ACE_MEDIA_DIR):
+                QMessageBox.critical(self, "오류", f"Ace Step Studio 데이터 폴더를 찾을 수 없습니다:\n{ACE_MEDIA_DIR}")
+                return
+            target = os.path.join(ACE_MEDIA_DIR, f"{song_id}.lrc")
+            detail = (
+                "ACE-Step Studio가 실행 중이 아니어서 기존 방식으로 적용합니다.\n"
+                f"다음 파일과 DB를 직접 덮어씁니다: {target}\n"
+                "Studio가 종료되어 있는지 확인하세요."
+            )
         reply = QMessageBox.question(
-            self, "확인",
-            f"다음 파일을 덮어씁니다 (지원되지 않는 비공식 방법):\n{target}\n계속하시겠습니까?",
+            self, "확인", detail + "\n계속하시겠습니까?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
@@ -1476,13 +1713,20 @@ class MainWindow(QWidget):
         try:
             db_path = os.path.join(ACE_DATA_DIR, "library.sqlite")
             lyrics_text = self.lyrics_edit.toPlainText()
-            result = apply_lrc_to_ace(song_id, lrc, lyrics_text, ACE_MEDIA_DIR, db_path)
-            msg = "LRC 파일이 작성되었습니다."
-            if result["db_updated"]:
-                msg += "\nDB(metadata_json.lrc)도 갱신되었습니다."
+            result = apply_lrc_to_ace(
+                song_id, lrc, lyrics_text, ACE_MEDIA_DIR, db_path, prefer_mcp=use_mcp
+            )
+            if result["method"] == "mcp":
+                msg = "가사 타이밍이 ACE-Step Studio에 적용되었습니다.\n즉시 반영되며 재시작이 필요 없습니다."
                 if result["lyrics_saved"]:
                     msg += "\n원본 가사(lyrics)도 함께 저장되었습니다."
-            msg += "\nACE-Step Studio를 재시작하면 반영됩니다."
+            else:
+                msg = "LRC 파일이 작성되었습니다."
+                if result["db_updated"]:
+                    msg += "\nDB(metadata_json.lrc)도 갱신되었습니다."
+                    if result["lyrics_saved"]:
+                        msg += "\n원본 가사(lyrics)도 함께 저장되었습니다."
+                msg += "\nACE-Step Studio를 재시작하면 반영됩니다."
             self.status_label.setText(f"Ace Step Studio에 적용됨: {result['target']}")
             QMessageBox.information(self, "완료", msg)
         except Exception as e:
@@ -1494,6 +1738,10 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         self._save_settings()
+        if getattr(self, "_system_monitor", None) is not None:
+            self._system_monitor.stop()
+            # nvidia-smi 조회가 진행 중일 수 있으므로 최대 조회 시간보다 길게 기다린다.
+            self._system_monitor.wait(5000)
         self.preview.viewport().removeEventFilter(self)
         self.audio_editor_panel.shutdown()
         if self.server_proc is not None and self.server_proc.poll() is None:

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """ACE-Step Studio 연동 유틸리티 (karaoke_gui.py에서 분리).
 
-ACE-Step Studio SQLite DB에서 곡 목록과 LRC를 읽거나,
-생성된 LRC를 ACE-Step Studio에 적용하는 순수 함수 모듈이다.
+Studio가 켜져 있으면 로컬 MCP의 공식 가사편집 도구(karaoke_set 등)로 LRC를 적용하고,
+Studio가 꺼져 있으면 기존의 SQLite DB 직접 갱신 방식으로 폴백한다.
 UI 의존성이 없으므로 단독 테스트가 가능하다.
 """
 
@@ -12,6 +12,8 @@ import shutil
 import sqlite3
 import datetime
 import tempfile
+
+from core import ace_step_mcp
 
 
 def load_ace_songs(db_path: str) -> list:
@@ -43,18 +45,43 @@ def get_lrc_for_song(song_id: str, meta_json: str, media_dir: str) -> str:
     return lrc
 
 
-def apply_lrc_to_ace(song_id: str, lrc: str, lyrics_text: str, media_dir: str, db_path: str) -> dict:
+def apply_lrc_to_ace(song_id: str, lrc: str, lyrics_text: str, media_dir: str,
+                     db_path: str, prefer_mcp: bool = True) -> dict:
     """LRC를 ACE-Step Studio에 적용한다. 결과 dict를 반환한다.
 
+    Studio가 실행 중이면 공식 MCP 도구(karaoke_set)로 타이밍을 설정한다.
+    Studio가 꺼져 있으면 기존의 .lrc 파일 + SQLite 직접 갱신 방식으로 폴백한다.
+
     Returns:
-        dict with keys: target, db_updated, lyrics_saved, backup_created
+        dict with keys: method, target, db_updated, lyrics_saved,
+        backup_created, karaoke_set
     """
     result = {
+        "method": "db",
         "target": os.path.join(media_dir, f"{song_id}.lrc"),
         "db_updated": False,
         "lyrics_saved": False,
         "backup_created": False,
+        "karaoke_set": False,
     }
+
+    if prefer_mcp and ace_step_mcp.is_studio_available():
+        # 곡 객체 전체를 덮어쓰는 library_song_update를 먼저 호출하고,
+        # 타이밍 설정(karaoke_set)을 마지막에 해야 karaoke 상태가 보존된다.
+        if lyrics_text.strip():
+            ace_step_mcp.set_lyrics(song_id, lyrics_text)
+            result["lyrics_saved"] = True
+        ace_step_mcp.set_karaoke(song_id, lrc)
+        result["karaoke_set"] = True
+        result["method"] = "mcp"
+        return result
+
+    return _apply_lrc_to_ace_db(song_id, lrc, lyrics_text, media_dir, db_path, result)
+
+
+def _apply_lrc_to_ace_db(song_id: str, lrc: str, lyrics_text: str, media_dir: str,
+                         db_path: str, result: dict) -> dict:
+    """기존 방식: .lrc 파일과 SQLite DB를 직접 갱신한다 (Studio 종료 필요)."""
     target = result["target"]
 
     temp_path = None
@@ -117,6 +144,7 @@ def apply_lrc_to_ace(song_id: str, lrc: str, lyrics_text: str, media_dir: str, d
             conn.commit()
             result["db_updated"] = True
         result["lyrics_saved"] = bool(result["lyrics_saved"])
+        result["karaoke_set"] = result["db_updated"]
         return result
     except Exception as error:
         rollback_error = None

@@ -59,6 +59,7 @@ HELP_MARKDOWN = r"""
 - **전체 줄 맞추기(ms)**: 모든 타임스탬프를 ±5000ms 조정
 - **선택된 줄 맞춤(ms)**: 커서가 있는 줄(또는 선택한 줄)만 개별 조정
 - **노래 시작 자동 맞춤**: 오디오 첫 발화 지점을 분석해 자동 조정
+- **타이밍 보정**: 타이밍 생성 시 실제 발성 구절/온셋에 맞춰 줄 시작점을 보정 (해제 시 Qwen 정렬 결과 그대로 사용)
 
 ### 노래방 미리보기 (자막 미리보기)
 - "재생" 버튼 또는 Space 키로 재생
@@ -153,15 +154,17 @@ A: 싱크 컨트롤(노래 시작 자동 맞춤, 선택 줄 맞춤, 전체 줄 �
 
 ## ACE-Step Studio 적용
 
-1. ACE-Step Studio 종료 (DB 잠금 방지)
-2. karaoke GUI에서 타이밍 생성
-3. ACE-Step 곡 선택 → "Ace Step Studio에 적용" 클릭
-4. "완료" 메시지 확인 (DB 갱신 + 백업 생성)
-5. ACE-Step Studio 재시작 → 가사 타이밍 반영
+**Studio가 실행 중이면 (권장)**
+1. ACE-Step Studio를 켜둔 상태에서 karaoke GUI에서 타이밍 생성
+2. ACE-Step 곡 선택 → "Ace Step Studio에 적용" 클릭
+3. Studio의 공식 가사편집 기능(`karaoke_set`)으로 타이밍이 설정됩니다
+4. 즉시 반영되며 **Studio를 종료하거나 재시작할 필요가 없습니다**
+5. 원본 가사가 입력되어 있으면 곡의 가사 텍스트도 함께 저장됩니다
 
-### 백업 파일
-- `media/{song_id}.lrc.bak`
-- `data/library.sqlite.bak`
+**Studio가 꺼져 있으면 (기존 방식)**
+1. ACE-Step Studio가 종료된 상태에서 적용
+2. `{song_id}.lrc` 파일과 `library.sqlite`를 직접 갱신 (백업 자동 생성)
+3. Studio를 재시작하면 반영됩니다
 
 ---
 

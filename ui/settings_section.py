@@ -91,6 +91,36 @@ class SettingsSection(QFrame):
         row.addWidget(btn_browse)
         self._content_layout.addLayout(row)
 
+        # 1.5행: 전사 엔진 / 타이밍 엔진
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(QLabel("전사 엔진:"))
+        self.engine_combo = QComboBox()
+        self.engine_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
+        self.engine_combo.addItems(["Faster-Whisper", "Qwen3-ASR", "없음 (타이밍만)"])
+        self.engine_combo.setCurrentText("없음 (타이밍만)")
+        self.engine_combo.setFixedWidth(130)
+        row.addWidget(self.engine_combo)
+        self.engine_combo.currentTextChanged.connect(lambda _: self.settings_changed.emit())
+
+        row.addWidget(QLabel("타이밍 엔진:"))
+        self.timing_combo = QComboBox()
+        self.timing_combo.setStyleSheet(
+            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #212121; "
+            "selection-background-color: #DBEAFE; selection-color: #1E3A8A; border: none; }"
+        )
+        self.timing_combo.addItems(["stable-ts (Whisper)", "Qwen ForcedAligner"])
+        self.timing_combo.setCurrentText("Qwen ForcedAligner")
+        self.timing_combo.setFixedWidth(160)
+        row.addWidget(self.timing_combo)
+        self.timing_combo.currentTextChanged.connect(lambda _: self.settings_changed.emit())
+
+        row.addStretch(1)
+        self._content_layout.addLayout(row)
+
         # 2행: 언어 / 모델 / 연산
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -141,13 +171,6 @@ class SettingsSection(QFrame):
         row.addStretch(1)
         self._content_layout.addLayout(row)
 
-        # 4행: 진행률 표시
-        row = QHBoxLayout()
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setVisible(False)
-        row.addWidget(self.progress, 1)
-        self._content_layout.addLayout(row)
         # 탭 전체 높이를 채울 때 설정 항목이 위쪽에 모이도록 여백을 둔다.
         self._content_layout.addStretch(1)
 
@@ -161,9 +184,6 @@ class SettingsSection(QFrame):
 
     def set_cancel_enabled(self, enabled: bool) -> None:
         self.btn_cancel.setEnabled(enabled)
-
-    def set_progress_visible(self, visible: bool) -> None:
-        self.progress.setVisible(visible)
 
     def set_audio_path(self, path: str) -> None:
         self.audio_edit.setText(path)

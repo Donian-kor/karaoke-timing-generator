@@ -10,7 +10,7 @@ import requests
 from PySide6.QtCore import QThread, Signal
 
 # STT 서버 주소 (karaoke_gui.py 등에서 공유)
-SERVER_URL = "http://127.0.0.1:8000"
+SERVER_URL = "http://127.0.0.1:8001"
 
 
 class TranscribeWorker(QThread):
@@ -20,11 +20,12 @@ class TranscribeWorker(QThread):
     finished = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, audio_path, language, lyrics=""):
+    def __init__(self, audio_path, language, lyrics="", refine_timing=True):
         super().__init__()
         self.audio_path = audio_path
         self.language = language
         self.lyrics = lyrics
+        self.refine_timing = refine_timing
 
     def run(self):
         try:
@@ -34,19 +35,20 @@ class TranscribeWorker(QThread):
 
     def _run_inner(self):
         try:
-            self.progress.emit("서버에 오디오 전송 중...")
+            self.progress.emit("서버에 오디오 전송 중... (전사/타이밍 생성은 시간이 걸릴 수 있습니다)")
             with open(self.audio_path, "rb") as f:
                 files = {"file": (os.path.basename(self.audio_path), f)}
                 data = {
                     "language": self.language,
                     "response_format": "verbose_json",
                     "lyrics": self.lyrics,
+                    "refine_timing": "true" if self.refine_timing else "false",
                 }
                 resp = requests.post(
                     f"{SERVER_URL}/v1/audio/transcriptions",
                     files=files,
                     data=data,
-                    timeout=600,
+                    timeout=1800,
                 )
             if resp.status_code != 200:
                 self.failed.emit(f"서버 오류 {resp.status_code}: {resp.text}")
