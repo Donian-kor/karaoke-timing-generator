@@ -1,6 +1,6 @@
 # karaoke-timing-generator
 
-로컬 STT 서버(Whisper / Qwen3-ASR)로 오디오에서 **노래방 타이밍(.lrc)**을 생성하고, ACE-Step Studio 곡에 가사 타이밍을 적용하는 도구입니다.  
+로컬 STT 서버(Whisper / Qwen3-ASR)로 오디오에서 **노래방 타이밍(.lrc)**을 생성하고, Yue2 Studio 곡에 가사 타이밍을 적용하는 도구입니다.
 오디오 편집기(멀티트랙 파형, 잡음 제거, 믹싱)와 시스템 모니터(CPU/GPU/RAM 사용량)도 함께 포함되어 있습니다.
 
 ---
@@ -13,13 +13,15 @@
 - **원본 가사 정렬**: 사용자가 입력한 원본 가사를 기준으로 타이밍 생성 (가창 발음 오인식 방지)
 - **원본 가사 편집해도 타이밍 보존**: 왼쪽 가사를 수정해도 우측에 생성된 단어 태그(`<mm:ss.cc>`)와 줄 수가 그대로 유지됨
 - **섹션 태그 제외**: `[Intro]`, `[Verse 1]` 등 섹션 태그는 타이밍 생성 대상에서 자동 제외
-- **LRC 편집**: 미리보기 영역에서 타임스탬프/가사 직접 편집 (포커스 아웃 시 단어 태그 자동 이동)
+- **구조·시작점 보정**: "타이밍 보정" 체크박스(기본 켜짐)로 실제 발성 구절/온셋에 맞춘 시작점 보정을 켜고 끌 수 있음
+- **LRC 편집**: 미리보기 영역에서 타임스탬프/가사 직접 편집 (포커스 아웃 시 `[시간]` 변경분만큼 같은 줄의 `<시간>` 자동 이동)
+- **자막 블록 크기 조절**: 파형 아래 자막 레인에서 블록 선택 후 좌우 끝 핸들을 드래그하면 `[시간]`/`<시간>`이 자동 갱신
 - **노래방 미리보기**: 재생 + 가사 오버레이 (현재 단어 하이라이트)
 - **타이밍 오프셋 조정**: 전체 타이밍 ±5000ms 미세 조정
 - **재생 속도 조절**: 0.5x ~ 1.5x
 - **키보드 컨트롤**: Space(재생/정지), ←/→(±5초)
 - **LRC 비교**: 원본 vs 수정 LRC 비교 + unified diff
-- **ACE-Step Studio 적용**: Studio 실행 중에는 공식 가사편집 기능(MCP)으로 즉시 반영, 꺼져 있으면 DB + 파일 저장(백업 자동 생성)
+- **Yue2 Studio 적용**: Studio 실행 중에는 공식 가사편집 기능(MCP)으로 즉시 반영, 꺼져 있으면 DB + 파일 저장(백업 자동 생성)
 - **설정 저장**: 모델/연산/언어/색상/폰트 크기 자동 저장 (settings.json)
 - **FFmpeg 콘솔 경고 정리**: 오디오 재생 시 뜨는 하드웨어 인코더 탐색 경고를 콘솔에서 숨김
 
@@ -78,7 +80,8 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 
 ## 실행 방법
 
-1. `run_server.bat` 더블클릭 → STT 서버 시작 (포트 8001)
+1. `run_server.bat` 더블클릭 → STT 서버 시작 (포트 8002)
+   - 다른 프로그램이 8001을 점유 중일 수 있어 기본 포트를 8002로 사용합니다.
    - 또는 GUI의 "서버 시작" 버튼으로 서버를 직접 띄울 수 있습니다.
    - 서버가 꺼진 상태에서 "타이밍 생성"을 누르면 GUI가 자동으로 서버를 시작하고, 준비되면 타이밍 생성을 이어갑니다.
    - 서버는 이 컴퓨터에서만 접속할 수 있으며, 오디오 파일 업로드는 최대 2GiB입니다.
@@ -94,10 +97,10 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 4. **엔진 선택**: 전사 엔진(`없음 (타이밍만)` 권장) / 타이밍 엔진(`Qwen ForcedAligner` 기본)
 5. **모델·연산 타입**: 전사 엔진을 쓸 경우에만 필요 (Whisper tiny~large-v3, int8/float16/float32)
 6. **(선택) 원본 가사 입력**: 왼쪽 패널에 가사 입력 → Whisper가 이 가사를 기준으로 타이밍 생성
-7. **(선택) Ace Step 곡 ID 입력**: ACE-Step Studio 곡 ID (UUID) 또는 콤보박스에서 선택
+7. **(선택) Yue2 Studio 곡 ID 입력**: Yue2 Studio 곡 ID (UUID) 또는 콤보박스에서 선택
 8. **타이밍 생성**: "타이밍 생성" 버튼 (생성 중에는 "취소"로 자동 전환)
 9. **편집**: 오른쪽 미리보기에서 타임스탬프/가사 직접 수정
-10. **Ace Step Studio에 적용**: 버튼 클릭 → Studio가 켜져 있으면 공식 가사편집 기능으로 즉시 반영 (재시작 불필요), 꺼져 있으면 DB + 파일 저장 (백업 자동 생성)
+10. **Yue2 Studio에 적용**: 버튼 클릭 → Studio가 켜져 있으면 공식 가사편집 기능으로 즉시 반영 (재시작 불필요), 꺼져 있으면 DB + 파일 저장 (백업 자동 생성)
 
 ---
 
@@ -141,11 +144,11 @@ Audacity 스타일 멀티트랙 편집기. 보컬(1번)과 반주(2번) 파형�
 
 ---
 
-## ACE-Step Studio 곡 ID 가져오기
+## Yue2 Studio 곡 ID 가져오기
 
-- ACE-Step Studio 라이브러리에서 곡 클릭 → 상세 패널
-- 또는 `%LOCALAPPDATA%\ACE-Step Studio\data\media\` 폴더에서 `{UUID}.flac` 파일명 확인
-- 또는 SQLite DB 조회: `%LOCALAPPDATA%\ACE-Step Studio\data\library.sqlite` → `songs` 테이블 `id` 컬럼
+- Yue2 Studio 라이브러리에서 곡 클릭 → 상세 패널
+- 또는 `%LOCALAPPDATA%\YuE2 Studio\data\media\` 폴더에서 `{UUID}.flac` 파일명 확인
+- 또는 SQLite DB 조회: `%LOCALAPPDATA%\YuE2 Studio\data\library.sqlite` → `songs` 테이블 `id` 컬럼
 
 ---
 
@@ -208,13 +211,13 @@ set COMPUTE_TYPE=int8
 [00:14.84]두 번째 라인
 ```
 
-### Enhanced LRC (ACE-Step Studio 형식)
+### Enhanced LRC (Yue2 Studio 형식)
 ```
 [00:09.66]<00:09.66>단어 <00:11.06>단어2
 [00:14.84]<00:14.84>두 번째 <00:16.24>라인
 ```
 
-ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합니다.
+Yue2 Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합니다.
 
 ---
 
@@ -240,25 +243,25 @@ ACE-Step Studio는 Enhanced LRC를 `metadata_json.lrc`에 저장하여 사용합
 
 ---
 
-## ACE-Step Studio 적용
+## Yue2 Studio 적용
 
 ### Studio가 실행 중일 때 (권장)
 
-Studio v4.0.2 이상은 `http://127.0.0.1:8792/mcp`로 로컬 MCP 서버를 띄웁니다.
+Studio는 `http://127.0.0.1:8791/mcp`로 로컬 MCP 서버를 띄웁니다.
 이 앱은 Studio의 공식 가사편집 도구(`karaoke_set`, `library_song_update`)를 호출하므로
 **DB를 직접 덮어쓰지 않고, Studio를 종료하거나 재시작할 필요가 없습니다.**
 
-1. ACE-Step Studio를 켜둔 상태에서 타이밍 생성
-2. 곡 선택 → "Ace Step Studio에 적용" 클릭
+1. Yue2 Studio를 켜둔 상태에서 타이밍 생성
+2. 곡 선택 → "Yue2 Studio에 적용" 클릭
 3. 확인 창에 "공식 가사편집 기능으로 적용합니다"가 표시되는지 확인
 4. 적용 즉시 Studio에 반영 (원본 가사도 입력되어 있으면 함께 저장됨)
 
 ### Studio가 꺼져 있을 때 (기존 방식)
 
-1. ACE-Step Studio가 종료된 상태에서 적용
+1. Yue2 Studio가 종료된 상태에서 적용
 2. `{song_id}.lrc` 파일과 `library.sqlite`를 직접 갱신
 3. "완료" 메시지 확인 (백업 자동 생성)
-4. ACE-Step Studio 재시작 → 가사 타이밍 반영
+4. Yue2 Studio 재시작 → 가사 타이밍 반영
 
 ### 백업 파일 (기존 방식에서만 생성)
 - `media/{song_id}.lrc.bak`
@@ -297,7 +300,7 @@ Studio v4.0.2 이상은 `http://127.0.0.1:8792/mcp`로 로컬 MCP 서버를 띄�
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-ACE-Step Studio MCP 호출(모킹), DB 폴백 경로, 원본 가사 편집 시 Enhanced LRC 보존을 검증합니다.
+Yue2 Studio MCP 호출(모킹), DB 폴백 경로, 원본 가사 편집 시 Enhanced LRC 보존을 검증합니다.
 
 ---
 
@@ -330,8 +333,8 @@ karaoke-timing-generator/
 │   ├── lrc_parser.py         # LRC 파싱/빌딩 유틸리티
 │   ├── server_worker.py      # 서버 시작/상태 확인 워커
 │   ├── timing_offset.py      # 타이밍 오프셋 조정 유틸리티
-│   ├── ace_step_mcp.py       # ACE-Step Studio 로컬 MCP 클라이언트 (공식 가사편집 도구 호출)
-│   ├── ace_step_integration.py  # ACE-Step Studio 연동 (MCP 우선, DB 폴백)
+│   ├── ace_step_mcp.py       # Yue2 Studio 로컬 MCP 클라이언트 (공식 가사편집 도구 호출)
+│   ├── ace_step_integration.py  # Yue2 Studio 연동 (MCP 우선, DB 폴백)
 │   └── system_monitor.py     # CPU/GPU/RAM 사용량 수집 워커
 ├── ui/                     # UI 위젯 모듈
 │   ├── __init__.py
@@ -381,7 +384,7 @@ karaoke-timing-generator/
 
 > 참고: `pydub`는 의존성 목록에서 빠졌습니다. 현재 코드에서 `import pydub`는 사용되지 않습니다.
 >
-> ACE-Step Studio는 제3자 애플리케이션이며, 이 프로그램에 포함되거나 배포되지 않습니다. 이 프로그램은 ACE-Step Studio의 데이터 파일(`library.sqlite`, `media/{id}.lrc`)을 **읽기 전용**으로 참조할 뿐입니다.
+> Yue2 Studio는 제3자 애플리케이션이며, 이 프로그램에 포함되거나 배포되지 않습니다. 이 프로그램은 Yue2 Studio의 곡 목록을 읽고, 사용자가 "적용"을 누르면 가사/타이밍을 저장합니다(Studio 실행 중에는 공식 MCP 도구, 꺼져 있으면 DB·파일 직접 갱신).
 >
 > ⚠️ **법적 고지**: 위 내용은 일반적인 정보이며 **법적 자문이 아닙니다**. 상업적 출시 전에는 반드시 변호사나 법무 전문가와 상의하시기 바랍니다.
 

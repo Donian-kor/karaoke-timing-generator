@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """설정/서버/오디오 파일 섹션 위젯 (karaoke_gui.py에서 분리).
 
-서버 상태, 오디오 파일 선택, 언어/모델/연산 설정, ACE-Step 곡 선택,
+서버 상태, 오디오 파일 선택, 언어/모델/연산 설정, Yue2 Studio 곡 선택,
 타이밍 생성/취소/오디오 편집/잡음 제거 버튼, 진행률 바를 포함한다.
 """
 
@@ -23,7 +23,7 @@ class SettingsSection(QFrame):
         cancel_clicked: 취소 버튼 클릭 시 발생
         audio_edit_clicked: 오디오 편집 버튼 클릭 시 발생
         denoise_clicked: 잡음 제거 버튼 클릭 시 발생
-        song_selected(int): ACE-Step 곡 선택 변경 시 발생
+        song_selected(int): Yue2 Studio 곡 선택 변경 시 발생
         song_refresh_clicked: 새로고침 버튼 클릭 시 발생
         settings_changed: 설정 값 변경 시 발생
     """

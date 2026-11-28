@@ -67,8 +67,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QFont, QWheelEvent, QShortcut, QKeySequence
 from audio_editor import AudioEditorPanel
 
-ACE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ACE-Step Studio", "data")
-ACE_MEDIA_DIR = os.path.join(ACE_DATA_DIR, "media")
+YUE_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "YuE2 Studio", "data")
+YUE_MEDIA_DIR = os.path.join(YUE_DATA_DIR, "media")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
 
@@ -370,6 +370,7 @@ class MainWindow(QWidget):
         self.lyrics_section = LyricsSection()
         self.progress = self.lyrics_section.progress
         self.elapsed_label = self.lyrics_section.elapsed_label
+        self.apply_result_label = self.lyrics_section.apply_result_label
         self.song_combo = self.lyrics_section.song_combo
         self.lyrics_section.song_selected.connect(self._on_song_selected)
         self.lyrics_section.song_refresh_clicked.connect(self._load_ace_songs)
@@ -614,19 +615,19 @@ class MainWindow(QWidget):
             self.server_status.setText("서버 상태: 중지됨")
 
     def _load_ace_songs(self):
-        """ACE-Step Studio 라이브러리에서 곡 목록을 읽어 콤보박스에 채웁니다."""
+        """Yue2 Studio 라이브러리에서 곡 목록을 읽어 콤보박스에 채웁니다."""
         self.song_combo.blockSignals(True)
         self.song_combo.clear()
         self.song_combo.addItem("(직접 입력)", "")
-        db_path = os.path.join(ACE_DATA_DIR, "library.sqlite")
+        db_path = os.path.join(YUE_DATA_DIR, "library.sqlite")
         if not os.path.exists(db_path):
-            self.song_combo.addItem("ACE-Step Studio 미설치", "")
+            self.song_combo.addItem("Yue2 Studio 미설치", "")
             self.song_combo.blockSignals(False)
             return
         try:
             rows = load_ace_songs(db_path)
             if not rows:
-                self.song_combo.addItem("ACE-Step Studio 미설치", "")
+                self.song_combo.addItem("Yue2 Studio 미설치", "")
             for sid, title in rows:
                 label = f"{title}  ({sid[:8]}...)"
                 self.song_combo.addItem(label, sid)
@@ -644,7 +645,7 @@ class MainWindow(QWidget):
         if not song_id:
             self._loading_song = False
             return
-        db_path = os.path.join(ACE_DATA_DIR, "library.sqlite")
+        db_path = os.path.join(YUE_DATA_DIR, "library.sqlite")
         if not os.path.exists(db_path):
             self._loading_song = False
             return
@@ -663,7 +664,7 @@ class MainWindow(QWidget):
 
         lyrics, meta_json = row
         plain = (lyrics or "").strip()
-        lrc = get_lrc_for_song(song_id, meta_json, ACE_MEDIA_DIR)
+        lrc = get_lrc_for_song(song_id, meta_json, YUE_MEDIA_DIR)
         restored_from_lrc = False
         if not plain and lrc:
             # 원본 가사가 비어 있으면 기존 LRC에서 타임코드만 제거해 복원한다.
@@ -755,7 +756,7 @@ class MainWindow(QWidget):
         # 이미 실행 중인 서버는 이 앱이 소유한 프로세스인지 확인할 수 없으므로 종료하지 않는다.
         if self.check_health():
             self.status_label.setText(
-                "포트 8001에서 서버가 이미 실행 중입니다. 기존 서버를 종료하지 않았습니다."
+                "포트 8002에서 서버가 이미 실행 중입니다. 기존 서버를 종료하지 않았습니다."
             )
             self._update_server_btn()
             if self._pending_generate:
@@ -837,7 +838,7 @@ class MainWindow(QWidget):
         server_running = self.check_health()
         if server_running:
             self.status_label.setText(
-                "포트 8001의 서버가 계속 응답 중입니다. 이 앱에서 시작하지 않은 서버는 종료하지 않았습니다."
+                "포트 8002의 서버가 계속 응답 중입니다. 이 앱에서 시작하지 않은 서버는 종료하지 않았습니다."
             )
         else:
             self.status_label.setText("서버가 중지되었습니다.")
@@ -990,7 +991,7 @@ class MainWindow(QWidget):
         self.result = result
         std = build_standard_lrc(result.get("segments", []))
         enh = build_enhanced_lrc(result.get("segments", []))
-        # ACE-Step Studio는 metadata_json의 "lrc" 필드(Enhanced LRC)를 사용합니다.
+        # Yue2 Studio는 metadata_json의 "lrc" 필드(Enhanced LRC)를 사용합니다.
         self._preview_set_text(enh)
         self._last_standard = std
         self._last_enhanced = enh
@@ -1685,50 +1686,45 @@ class MainWindow(QWidget):
             return
         song_id = self.song_combo.currentData()
         if not song_id:
-            QMessageBox.warning(self, "경고", "ACE-Step 곡을 선택하세요. (목록 새로고침)")
+            QMessageBox.warning(self, "경고", "Yue2 Studio 곡을 선택하세요. (목록 새로고침)")
             return
+
+        song_title = self.song_combo.currentText()
+        track_info = f"트랙 ID: {song_id}\n트랙 제목: {song_title}"
 
         use_mcp = is_studio_available()
         if use_mcp:
             detail = (
-                "ACE-Step Studio의 공식 가사편집 기능으로 적용합니다.\n"
+                f"{track_info}\n\n"
+                "Yue2 Studio의 공식 가사편집 기능으로 적용합니다.\n"
                 "Studio를 종료하거나 재시작할 필요가 없습니다."
             )
         else:
-            if not os.path.isdir(ACE_MEDIA_DIR):
-                QMessageBox.critical(self, "오류", f"Ace Step Studio 데이터 폴더를 찾을 수 없습니다:\n{ACE_MEDIA_DIR}")
+            if not os.path.isdir(YUE_MEDIA_DIR):
+                QMessageBox.critical(self, "오류", f"Yue2 Studio 데이터 폴더를 찾을 수 없습니다:\n{YUE_MEDIA_DIR}")
                 return
-            target = os.path.join(ACE_MEDIA_DIR, f"{song_id}.lrc")
+            target = os.path.join(YUE_MEDIA_DIR, f"{song_id}.lrc")
             detail = (
-                "ACE-Step Studio가 실행 중이 아니어서 기존 방식으로 적용합니다.\n"
+                f"{track_info}\n\n"
+                "Yue2 Studio가 실행 중이 아니어서 기존 방식으로 적용합니다.\n"
                 f"다음 파일과 DB를 직접 덮어씁니다: {target}\n"
                 "Studio가 종료되어 있는지 확인하세요."
             )
         reply = QMessageBox.question(
-            self, "확인", detail + "\n계속하시겠습니까?",
+            self, "적용 확인", detail + "\n\n계속하시겠습니까?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
         try:
-            db_path = os.path.join(ACE_DATA_DIR, "library.sqlite")
+            db_path = os.path.join(YUE_DATA_DIR, "library.sqlite")
             lyrics_text = self.lyrics_edit.toPlainText()
-            result = apply_lrc_to_ace(
-                song_id, lrc, lyrics_text, ACE_MEDIA_DIR, db_path, prefer_mcp=use_mcp
+            apply_lrc_to_ace(
+                song_id, lrc, lyrics_text, YUE_MEDIA_DIR, db_path, prefer_mcp=use_mcp
             )
-            if result["method"] == "mcp":
-                msg = "가사 타이밍이 ACE-Step Studio에 적용되었습니다.\n즉시 반영되며 재시작이 필요 없습니다."
-                if result["lyrics_saved"]:
-                    msg += "\n원본 가사(lyrics)도 함께 저장되었습니다."
-            else:
-                msg = "LRC 파일이 작성되었습니다."
-                if result["db_updated"]:
-                    msg += "\nDB(metadata_json.lrc)도 갱신되었습니다."
-                    if result["lyrics_saved"]:
-                        msg += "\n원본 가사(lyrics)도 함께 저장되었습니다."
-                msg += "\nACE-Step Studio를 재시작하면 반영됩니다."
-            self.status_label.setText(f"Ace Step Studio에 적용됨: {result['target']}")
-            QMessageBox.information(self, "완료", msg)
+            done_msg = f"{song_id} , {song_title} 에 노래방타이밍 생성이 저장 됐습니다."
+            self.apply_result_label.setText(done_msg)
+            self.status_label.setText(done_msg)
         except Exception as e:
             QMessageBox.critical(self, "오류", str(e))
 

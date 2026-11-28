@@ -10,7 +10,7 @@ import requests
 from PySide6.QtCore import QThread, Signal
 
 # STT 서버 주소 (karaoke_gui.py 등에서 공유)
-SERVER_URL = "http://127.0.0.1:8001"
+SERVER_URL = "http://127.0.0.1:8002"
 
 
 class TranscribeWorker(QThread):

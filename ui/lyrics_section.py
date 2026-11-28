@@ -13,7 +13,7 @@ class LyricsSection(QFrame):
     """가사 / LRC 편집 섹션 위젯.
 
     시그널:
-        apply_clicked: Ace Step Studio에 적용 버튼 클릭
+        apply_clicked: Yue2 Studio에 적용 버튼 클릭
         compare_clicked: LRC 비교 버튼 클릭
         revert_clicked: 원본 복원 버튼 클릭
         auto_offset_clicked: 노래 시작 자동 맞춤 버튼 클릭
@@ -53,7 +53,7 @@ class LyricsSection(QFrame):
         layout.setContentsMargins(8, 8, 2, 8)
         layout.setSpacing(12)
 
-        # ── 제목 행 (ACE-Step 곡 선택 + 제목 + 액션 버튼 우측 정렬) ──
+        # ── 제목 행 (Yue2 Studio 곡 선택 + 제목 + 액션 버튼 우측 정렬) ──
         title_row = QHBoxLayout()
         title = QLabel("가사 / LRC 편집")
         title.setProperty("sectionTitle", True)
@@ -134,10 +134,10 @@ class LyricsSection(QFrame):
 
         layout.addLayout(title_row)
 
-        # ── ACE-Step 곡 선택 행 (가로 폭을 넓게) ──
+        # ── Yue2 Studio 곡 선택 행 (가로 폭을 넓게) ──
         song_row = QHBoxLayout()
         song_row.setSpacing(6)
-        song_label = QLabel("ACE-Step 곡:")
+        song_label = QLabel("Yue2 Studio 곡:")
         song_row.addWidget(song_label)
         self.song_combo = QComboBox()
         self.song_combo.setStyleSheet(
@@ -200,7 +200,7 @@ class LyricsSection(QFrame):
         btns_layout.setSpacing(6)
 
                 # All buttons added directly to btns_layout (single row)
-        self.btn_apply = QPushButton("Ace Step Studio에 적용")
+        self.btn_apply = QPushButton("Yue2 Studio에 적용")
         self.btn_apply.clicked.connect(lambda: self.apply_clicked.emit())
         self.btn_apply.setProperty("success", True)
         btns_layout.addWidget(self.btn_apply)
@@ -224,6 +224,12 @@ class LyricsSection(QFrame):
         self.btn_redo.setProperty("secondary", True)
         self.btn_redo.clicked.connect(lambda: self.redo_clicked.emit())
         btns_layout.addWidget(self.btn_redo)
+
+        # Ace Step 적용 결과 ("다시 실행" 버튼 우측)
+        self.apply_result_label = QLabel("")
+        self.apply_result_label.setWordWrap(True)
+        self.apply_result_label.setStyleSheet("color: #047857; font-weight: 600;")
+        btns_layout.addWidget(self.apply_result_label)
 
         btns_layout.addStretch(1)
         # 경과 시간 표시 (진행률 바 왼쪽)
@@ -313,7 +319,7 @@ class LyricsSection(QFrame):
         self._gen_pulse_timer.timeout.connect(_pulse)
         self._gen_pulse_timer.start()
 
-    # ---------- ACE-Step 곡 목록 ----------
+    # ---------- Yue2 Studio 곡 목록 ----------
     def add_song_item(self, text: str, data=None) -> None:
         self.song_combo.addItem(text, data)
 

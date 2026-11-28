@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""ACE-Step Studio 로컬 MCP 클라이언트.
+"""Yue2 Studio 로컬 MCP 클라이언트 (구 ACE-Step Studio 자리).
 
-Studio가 실행 중일 때 띄우는 ``http://127.0.0.1:8792/mcp`` (Streamable HTTP,
+Studio가 실행 중일 때 띄우는 ``http://127.0.0.1:8791/mcp`` (Streamable HTTP,
 stateless JSON-RPC)를 호출해 공식 도구를 실행한다. DB를 직접 쓰지 않으므로
 Studio를 종료할 필요가 없고, 변경 사항이 Studio 화면과 Activity에 즉시 반영된다.
 """
@@ -11,7 +11,7 @@ import itertools
 
 import requests
 
-MCP_URL = "http://127.0.0.1:8792/mcp"
+MCP_URL = "http://127.0.0.1:8791/mcp"
 REQUIRED_TOOLS = {"karaoke_set", "library_song_update"}
 
 # localhost 호출이 프록시 환경변수에 휩쓸리지 않도록 신뢰 환경을 끈 세션을 쓴다.
@@ -79,11 +79,11 @@ def _post(method: str, params: dict, timeout: float) -> dict:
         )
     except requests.RequestException as exc:
         raise StudioUnavailableError(
-            "ACE-Step Studio에 연결할 수 없습니다. Studio가 실행 중인지 확인하세요."
+            "Yue2 Studio에 연결할 수 없습니다. Studio가 실행 중인지 확인하세요."
         ) from exc
 
     if response.status_code >= 400:
-        raise StudioUnavailableError(f"ACE-Step Studio MCP 오류 (HTTP {response.status_code})")
+        raise StudioUnavailableError(f"Yue2 Studio MCP 오류 (HTTP {response.status_code})")
 
     body = _parse_body(response.text)
     if "error" in body:

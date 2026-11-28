@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ACE-Step Studio 연동 유틸리티 (karaoke_gui.py에서 분리).
+"""Yue2 Studio 연동 유틸리티 (karaoke_gui.py에서 분리).
 
 Studio가 켜져 있으면 로컬 MCP의 공식 가사편집 도구(karaoke_set 등)로 LRC를 적용하고,
 Studio가 꺼져 있으면 기존의 SQLite DB 직접 갱신 방식으로 폴백한다.
@@ -17,13 +17,28 @@ from core import ace_step_mcp
 
 
 def load_ace_songs(db_path: str) -> list:
-    """ACE-Step Studio DB에서 곡 목록을 (id, title) 리스트로 반환한다."""
+    """Yue2 Studio DB에서 곡 목록을 (id, title) 리스트로 반환한다.
+
+    Yue2 Studio는 곡을 물리적으로 지우지 않고 metadata_json의 deleted_at으로
+    숨기므로, 삭제된 곡은 목록에서 제외한다.
+    """
     if not os.path.exists(db_path):
         return []
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
-    rows = conn.execute("SELECT id, title FROM songs ORDER BY created_at DESC").fetchall()
+    rows = conn.execute(
+        "SELECT id, title, metadata_json FROM songs ORDER BY created_at DESC"
+    ).fetchall()
     conn.close()
-    return rows
+    result = []
+    for song_id, title, meta_json in rows:
+        try:
+            meta = json.loads(meta_json) if meta_json else {}
+        except Exception:
+            meta = {}
+        if isinstance(meta, dict) and meta.get("deleted_at"):
+            continue
+        result.append((song_id, title))
+    return result
 
 
 def get_lrc_for_song(song_id: str, meta_json: str, media_dir: str) -> str:
@@ -47,7 +62,7 @@ def get_lrc_for_song(song_id: str, meta_json: str, media_dir: str) -> str:
 
 def apply_lrc_to_ace(song_id: str, lrc: str, lyrics_text: str, media_dir: str,
                      db_path: str, prefer_mcp: bool = True) -> dict:
-    """LRC를 ACE-Step Studio에 적용한다. 결과 dict를 반환한다.
+    """LRC를 Yue2 Studio에 적용한다. 결과 dict를 반환한다.
 
     Studio가 실행 중이면 공식 MCP 도구(karaoke_set)로 타이밍을 설정한다.
     Studio가 꺼져 있으면 기존의 .lrc 파일 + SQLite 직접 갱신 방식으로 폴백한다.

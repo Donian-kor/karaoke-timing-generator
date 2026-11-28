@@ -11,7 +11,7 @@ import requests
 from PySide6.QtCore import QThread, Signal
 
 # STT 서버 주소
-SERVER_URL = "http://127.0.0.1:8001"
+SERVER_URL = "http://127.0.0.1:8002"
 
 
 class ServerStartWorker(QThread):
@@ -42,7 +42,7 @@ class ServerStartWorker(QThread):
         try:
             with open(err_file, "w") as ef:
                 self.proc = subprocess.Popen(
-                    [self.python_exe, "-m", "uvicorn", "stt_server:app", "--host", "127.0.0.1", "--port", "8001"],
+                    [self.python_exe, "-m", "uvicorn", "stt_server:app", "--host", "127.0.0.1", "--port", "8002"],
                     cwd=self.script_dir,
                     env=env,
                     stdout=ef,
@@ -54,7 +54,7 @@ class ServerStartWorker(QThread):
         for i in range(120):
             time.sleep(1)
             try:
-                r = requests.get("http://127.0.0.1:8001/health", timeout=2)
+                r = requests.get("http://127.0.0.1:8002/health", timeout=2)
                 if r.status_code == 200:
                     self.finished.emit(True, "")
                     return
